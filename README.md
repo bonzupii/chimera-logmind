@@ -8,10 +8,12 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
   - `ingest journal --seconds [--limit]` and `ingest all` for multi-source ingestion
   - `query logs` with filters: `since`, `min_severity`, `source`, `unit`, `hostname`, `contains`, `limit`, `order`
   - `search --query "text"` for semantic log search
-  - `index` for embedding generation
-  - `anomalies` for log anomaly detection
-  - `metrics` and `alerts` for system health monitoring
-  - `config` commands for log source management
+- `index` for embedding generation
+- `anomalies` for log anomaly detection
+- `metrics` and `alerts` for system health monitoring
+- `config` commands for log source management
+- `chat --message "text"` for AI-powered log analysis chat
+- `chat-history`, `chat-clear`, and `chat-stats` for chat management
 - Python backend (`api/server.py`) listening on `/run/chimera/api.sock` (or `CHIMERA_API_SOCKET`)
   - Concurrency via threads
   - DuckDB storage + schema initialization
@@ -19,10 +21,11 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
   - Cursor-based incremental ingest (persists `__CURSOR` in `ingest_state`)
   - Dedup via unique `cursor` and a message `fingerprint`
   - Semantic search with Ollama embeddings and ChromaDB
-  - Anomaly detection for log patterns
-  - System health monitoring with metrics and alerts
-  - Configuration management for log sources
-- Minimal TUI (`chimera-tui`) with tabs for logs, search, health, and actions
+- Anomaly detection for log patterns
+- System health monitoring with metrics and alerts
+- Configuration management for log sources
+- RAG (Retrieval-Augmented Generation) chat for intelligent log analysis
+- Minimal TUI (`chimera-tui`) with tabs for logs, search, health, chat, and actions
 - Ops: installer and systemd unit for production use
 
 ## Quickstart (development)
@@ -51,7 +54,7 @@ cargo build --manifest-path cli/Cargo.toml
 # Run the TUI (uses CHIMERA_API_SOCKET or defaults to /run/chimera/api.sock)
 ./cli/target/debug/chimera-tui
 ```
-Keys: q quit, ←/→ switch tabs, ↑/↓ select, r refresh, i ingest 5m, I ingest 1h.
+Keys: q quit, ←/→ switch tabs, ↑/↓ select, r refresh, i ingest 5m, I ingest 1h, c chat (in chat tab).
 
 ## Production install (systemd)
 Prereqs: `journalctl` access and DuckDB for Python.
@@ -81,6 +84,10 @@ newgrp chimera
 - `METRICS [type=TYPE] [since=SEC] [limit=N]` → NDJSON
 - `COLLECT_METRICS` → `OK collected=N`
 - `ALERTS [since=SEC] [severity=…] [acknowledged=BOOL]` → NDJSON
+- `CHAT message="text"` → JSON
+- `CHAT_HISTORY` → JSON
+- `CHAT_CLEAR` → `OK history-cleared`
+- `CHAT_STATS` → JSON
 - `CONFIG GET|LIST|ADD_SOURCE|REMOVE_SOURCE|UPDATE_SOURCE` → JSON/OK
 
 ## Environment variables
@@ -99,6 +106,7 @@ newgrp chimera
 - `contains` uses a simple `ILIKE` filter; for large-scale search, consider DuckDB FTS in a future phase
 - Cursor-based ingest avoids duplicates and reprocessing
 - Semantic search requires Ollama with nomic-embed-text model
+- RAG chat requires Ollama with llama2 model (or other compatible model)
 - System health monitoring requires psutil and systemd access
 - ChromaDB stores embeddings in `/var/lib/chimera/chromadb`
 
