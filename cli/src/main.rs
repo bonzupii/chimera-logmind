@@ -103,6 +103,18 @@ enum Commands {
         #[arg(long)]
         acknowledged: Option<bool>,
     },
+    /// Chat with AI about logs
+    Chat {
+        /// Chat message
+        #[arg(long)]
+        message: String,
+    },
+    /// Get chat history
+    ChatHistory,
+    /// Clear chat history
+    ChatClear,
+    /// Get chat system stats
+    ChatStats,
 }
 
 #[derive(Subcommand, Debug)]
@@ -347,6 +359,23 @@ fn main() -> Result<()> {
             if let Some(a) = acknowledged { parts.push(format!("acknowledged={}", a)); }
             let cmd = parts.join(" ");
             let response = send_request(&cli.socket, &cmd)?;
+            print!("{}", response);
+        }
+        Commands::Chat { message } => {
+            let cmd = format!("CHAT message={}", urlencoding::encode(&message));
+            let response = send_request(&cli.socket, &cmd)?;
+            print!("{}", response);
+        }
+        Commands::ChatHistory => {
+            let response = send_request(&cli.socket, "CHAT_HISTORY")?;
+            print!("{}", response);
+        }
+        Commands::ChatClear => {
+            let response = send_request(&cli.socket, "CHAT_CLEAR")?;
+            println!("{}", response.trim_end());
+        }
+        Commands::ChatStats => {
+            let response = send_request(&cli.socket, "CHAT_STATS")?;
             print!("{}", response);
         }
     }
