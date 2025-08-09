@@ -206,6 +206,17 @@ class SystemMetricsCollector:
             "uptime": self.collect_uptime_metrics(),
         }
 
+    def _convert_timestamps_to_iso(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Recursively convert datetime objects in a dictionary to ISO format strings."""
+        for k, v in data.items():
+            if isinstance(v, dt.datetime):
+                data[k] = v.isoformat()
+            elif isinstance(v, dict):
+                data[k] = self._convert_timestamps_to_iso(v)
+            elif isinstance(v, list):
+                data[k] = [self._convert_timestamps_to_iso(item) if isinstance(item, dict) else item for item in v]
+        return data
+
     def store_metrics(self, metrics: Dict[str, Any]) -> int:
         """Store metrics in DuckDB"""
         conn = get_connection(self.db_path)
@@ -215,10 +226,11 @@ class SystemMetricsCollector:
                 CREATE TABLE IF NOT EXISTS system_metrics (
                     timestamp TIMESTAMP NOT NULL,
                     metric_type TEXT NOT NULL,
-                    metric_data JSON,
-                    INDEX (timestamp, metric_type)
+                    metric_data TEXT
                 );
             """)
+
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_system_metrics_ts_type ON system_metrics (timestamp, metric_type);")
 
             total_stored = 0
 
@@ -229,14 +241,14 @@ class SystemMetricsCollector:
                     for metric in metric_data:
                         conn.execute(
                             "INSERT INTO system_metrics (timestamp, metric_type, metric_data) VALUES (?, ?, ?)",
-                            [metric["timestamp"], metric_type, json.dumps(metric)]
+                            [metric["timestamp"], metric_type, json.dumps(self._convert_timestamps_to_iso(metric))]
                         )
                         total_stored += 1
                 else:
                     # Single metric (cpu, memory, uptime)
                     conn.execute(
                         "INSERT INTO system_metrics (timestamp, metric_type, metric_data) VALUES (?, ?, ?)",
-                        [metric_data["timestamp"], metric_type, json.dumps(metric_data)]
+                        [metric_data["timestamp"], metric_type, json.dumps(self._convert_timestamps_to_iso(metric_data))]
                     )
                     total_stored += 1
 
@@ -357,7 +369,7 @@ class SystemHealthMonitor:
                     alert_type TEXT NOT NULL,
                     severity TEXT NOT NULL,
                     message TEXT NOT NULL,
-                    metric_data JSON,
+                    metric_data TEXT,
                     acknowledged BOOLEAN DEFAULT FALSE,
                     acknowledged_at TIMESTAMP,
                     INDEX (timestamp, alert_type, severity)

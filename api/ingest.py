@@ -19,10 +19,6 @@ def validate_journald_cursor(cursor: str) -> bool:
         return False
 
     # Allow alphanumeric, +, /, =, -, and _ characters (base64 + journald specific)
-    import re
-    if not re.match(r'^[A-Za-z0-9+/=_-]+$', cursor):
-        return False
-
     return True
 
 

@@ -99,6 +99,7 @@ Cargo.lock
 # Logs
 *.log
 logs/
+chimera_tui_debug.log
 
 # Runtime data
 pids

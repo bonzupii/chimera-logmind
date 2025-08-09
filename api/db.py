@@ -182,6 +182,26 @@ def _create_tables(conn) -> None:
         logger.error(f"Error creating log_embeddings table: {e}")
         raise
 
+    # Create system_alerts table
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS system_alerts (
+                id BIGINT PRIMARY KEY,
+                timestamp TIMESTAMP NOT NULL,
+                alert_type TEXT,
+                severity TEXT,
+                message TEXT,
+                metric_data JSON,
+                acknowledged BOOLEAN
+            );
+            """
+        )
+        logger.debug("Table 'system_alerts' created or already exists.")
+    except Exception as e:
+        logger.error(f"Error creating system_alerts table: {e}")
+        raise
+
 
 def _create_indexes(conn) -> None:
     """Create all required database indexes."""
@@ -232,3 +252,12 @@ def initialize_schema(conn) -> None:
     _create_indexes(conn)
 
     logger.info("Database schema initialization complete.")
+
+def clear_table(conn, table_name: str) -> None:
+    """Clears all data from the specified table."""
+    try:
+        conn.execute(f"DELETE FROM {table_name}")
+        logger.info(f"Table '{table_name}' cleared.")
+    except Exception as e:
+        logger.error(f"Error clearing table '{table_name}': {e}")
+        raise

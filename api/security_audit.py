@@ -42,7 +42,7 @@ class SecurityAuditor:
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS security_audits (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id BIGINT PRIMARY KEY,
                     tool TEXT NOT NULL,
                     scan_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     status TEXT NOT NULL,
@@ -508,7 +508,7 @@ class SecurityAuditor:
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS security_audits (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id BIGINT PRIMARY KEY,
                     tool TEXT NOT NULL,
                     scan_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     status TEXT NOT NULL,

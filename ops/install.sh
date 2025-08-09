@@ -81,7 +81,7 @@ else
     rm -f "$BUILD_LOG"
 
     # The binary is at target/release/cli, but we install it as 'chimera'
-    CLI_BINARY_PATH="$CLI_PROJECT_PATH/target/release/cli"
+    CLI_BINARY_PATH="$CLI_PROJECT_PATH/target/release/chimera"
     TUI_BINARY_PATH="$CLI_PROJECT_PATH/target/release/chimera-tui"
 
     if [ -f "$CLI_BINARY_PATH" ]; then

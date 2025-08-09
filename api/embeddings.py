@@ -4,6 +4,9 @@ import requests
 from typing import List, Dict, Any, Optional, Tuple
 import threading
 import time
+import logging
+
+logger = logging.getLogger("chimera")
 
 from .db import get_connection
 
@@ -117,8 +120,10 @@ class ChromaDBClient:
             for metadata in metadatas:
                 safe_meta = {}
                 for k, v in metadata.items():
-                    if isinstance(v, (str, int, float, bool)) or v is None:
+                    if isinstance(v, (str, int, float, bool)):
                         safe_meta[k] = v
+                    elif v is None:
+                        safe_meta[k] = "" # Convert None to empty string
                     else:
                         safe_meta[k] = str(v)  # Convert complex types to strings
                 safe_metadatas.append(safe_meta)
@@ -212,11 +217,11 @@ class SemanticSearchEngine:
                 texts.append(search_text)
                 metadatas.append({
                     "log_id": log_id,
-                    "ts": ts.isoformat() if ts else None,
-                    "hostname": hostname,
-                    "source": source,
-                    "unit": unit,
-                    "severity": severity,
+                    "ts": ts.isoformat() if ts else "",
+                    "hostname": hostname or "",
+                    "source": source or "",
+                    "unit": unit or "",
+                    "severity": severity or "",
                 })
                 documents.append(message or "")
                 ids.append(f"log_{log_id}")
@@ -235,6 +240,7 @@ class SemanticSearchEngine:
 
             # Add to ChromaDB
             ids, embeddings, metadatas, documents = zip(*valid_data)
+            logger.debug(f"Adding {len(ids)} embeddings to ChromaDB. Sample metadata: {metadatas[0] if metadatas else 'N/A'}")
             self.chroma_client.add_embeddings(list(ids), list(embeddings), list(metadatas), list(documents))
 
             # Record in database
@@ -255,7 +261,7 @@ class SemanticSearchEngine:
         where_clause = {}
         if since_seconds:
             since_ts = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=since_seconds)
-            where_clause["ts"] = {"$gte": since_ts.isoformat()}
+            where_clause["ts"] = {"$gte": since_ts.timestamp()}
         if source:
             where_clause["source"] = source
         if unit:
@@ -288,10 +294,10 @@ class SemanticSearchEngine:
             if (results.get("distances") and results["distances"] and
                 len(results["distances"]) > 0 and i < len(results["distances"][0])):
                 search_results.append({
-                    "ts": ts.isoformat() if ts else None,
-                    "hostname": hostname,
+                    "ts": ts.isoformat() if ts else "",
+                    "hostname": hostname or "",
                     "source": src,
-                    "unit": unit,
+                    "unit": unit or "",
                     "severity": sev,
                     "pid": pid,
                     "message": message,
@@ -396,7 +402,7 @@ class AnomalyDetector:
             for unit, error_count in cur.fetchall():
                 anomalies.append({
                     "type": "error_spike",
-                    "unit": unit,
+                    "unit": unit or "",
                     "count": error_count,
                     "severity": "high",
                     "description": f"High error rate in {unit}: {error_count} errors"
@@ -415,7 +421,7 @@ class AnomalyDetector:
             for source, log_count in cur.fetchall():
                 anomalies.append({
                     "type": "high_volume",
-                    "source": source,
+                    "source": source or "",
                     "count": log_count,
                     "severity": "medium",
                     "description": f"High log volume from {source}: {log_count} logs"
@@ -436,7 +442,7 @@ class AnomalyDetector:
             for unit in missing_units:
                 anomalies.append({
                     "type": "missing_logs",
-                    "unit": unit,
+                    "unit": unit or "",
                     "severity": "medium",
                     "description": f"Missing expected logs from {unit}"
                 })
@@ -596,7 +602,7 @@ Answer:"""
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS chat_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARY KEY SERIAL,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
@@ -639,7 +645,7 @@ Answer:"""
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS chat_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARY KEY SERIAL,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,

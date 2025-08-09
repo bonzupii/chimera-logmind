@@ -1,4 +1,5 @@
 use anyhow::Result;
+use log::{debug, error, info, warn};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
     execute,
@@ -14,7 +15,8 @@ use ratatui::{
 };
 
 use std::collections::HashMap;
-use std::io::{self, Write};
+use std::fs::File;
+use std::io::{self, Write, BufWriter};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -320,12 +322,14 @@ impl App {
 
 // Network functions
 fn uds_request(socket_path: &str, command: &str) -> Result<String> {
+    debug!("Sending UDS request to {}: {}", socket_path, command);
     let mut stream = UnixStream::connect(socket_path)?;
     stream.write_all(command.as_bytes())?;
     stream.shutdown(Shutdown::Write)?;
 
     let mut response = String::new();
     std::io::Read::read_to_string(&mut stream, &mut response)?;
+    debug!("Received UDS response: {}", response);
     Ok(response)
 }
 
@@ -376,8 +380,11 @@ fn fetch_logs(socket: &str, since: u64, limit: usize) -> Result<Vec<LogItem>> {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
             });
+        } else {
+            warn!("Failed to parse log line as JSON: {}", line);
         }
     }
+    info!("Fetched {} logs.", logs.len());
     Ok(logs)
 }
 
@@ -425,8 +432,11 @@ fn fetch_metrics(
                     .unwrap_or("")
                     .to_string(),
             });
+        } else {
+            warn!("Failed to parse metric line as JSON: {}", line);
         }
     }
+    info!("Fetched {} metrics.", metrics.len());
     Ok(metrics)
 }
 
@@ -474,8 +484,11 @@ fn fetch_alerts(socket: &str, since: u64, severity: Option<&str>) -> Result<Vec<
                     .unwrap_or("")
                     .to_string(),
             });
+        } else {
+            warn!("Failed to parse alert line as JSON: {}", line);
         }
     }
+    info!("Fetched {} alerts.", alerts.len());
     Ok(alerts)
 }
 
@@ -514,8 +527,11 @@ fn fetch_anomalies(socket: &str, since: u64) -> Result<Vec<AnomalyItem>> {
                     .unwrap_or("")
                     .to_string(),
             });
+        } else {
+            warn!("Failed to parse anomaly line as JSON: {}", line);
         }
     }
+    info!("Fetched {} anomalies.", anomalies.len());
     Ok(anomalies)
 }
 
@@ -555,8 +571,11 @@ fn fetch_reports(socket: &str, limit: usize) -> Result<Vec<ReportItem>> {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0) as usize,
             });
+        } else {
+            warn!("Failed to parse report line as JSON: {}", line);
         }
     }
+    info!("Fetched {} reports.", reports.len());
     Ok(reports)
 }
 
@@ -600,8 +619,11 @@ fn fetch_security_audits(socket: &str, limit: usize) -> Result<Vec<SecurityAudit
                     .unwrap_or("")
                     .to_string(),
             });
+        } else {
+            warn!("Failed to parse security audit line as JSON: {}", line);
         }
     }
+    info!("Fetched {} security audits.", audits.len());
     Ok(audits)
 }
 
@@ -641,8 +663,11 @@ fn fetch_config_sources(socket: &str) -> Result<Vec<ConfigSource>> {
                     .unwrap_or(false),
                 config: config_map,
             });
+        } else {
+            warn!("Failed to parse config source line as JSON: {}", line);
         }
     }
+    info!("Fetched {} config sources.", sources.len());
     Ok(sources)
 }
 
@@ -664,6 +689,7 @@ fn fetch_system_health(socket: &str) -> Result<Option<SystemHealth>> {
                 })
                 .unwrap_or_else(HashMap::new);
 
+            info!("Fetched system health.");
             return Ok(Some(SystemHealth {
                 cpu_percent: health_data
                     .get("cpu_percent")
@@ -701,8 +727,11 @@ fn fetch_system_health(socket: &str) -> Result<Option<SystemHealth>> {
                     .unwrap_or(0) as usize,
                 service_status,
             }));
+        } else {
+            warn!("Failed to parse system health line as JSON: {}", line);
         }
     }
+    info!("No system health data found.");
     Ok(None)
 }
 
@@ -776,8 +805,11 @@ fn search_semantic(
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0);
             results.push((log_item, similarity));
+        } else {
+            warn!("Failed to parse search result line as JSON: {}", line);
         }
     }
+    info!("Performed semantic search for query '{}', found {} results.", query, results.len());
     Ok(results)
 }
 
@@ -787,6 +819,7 @@ fn send_chat_message(socket: &str, message: &str) -> Result<ChatMessage> {
 
     if let Some(line) = response.lines().next() {
         if let Ok(chat_data) = serde_json::from_str::<serde_json::Value>(line) {
+            info!("Sent chat message: '{}'.", message);
             return Ok(ChatMessage {
                 role: "assistant".to_string(),
                 content: chat_data
@@ -807,6 +840,7 @@ fn send_chat_message(socket: &str, message: &str) -> Result<ChatMessage> {
         }
     }
 
+    error!("Failed to parse chat response for message: '{}'.", message);
     Err(anyhow::anyhow!("Failed to parse chat response"))
 }
 
@@ -817,20 +851,28 @@ fn trigger_ingest(socket: &str, seconds: u64, limit: Option<usize>) -> Result<St
     } else {
         format!("INGEST_JOURNAL {}", seconds)
     };
-    uds_request(socket, &cmd)
+    let response = uds_request(socket, &cmd)?;
+    info!("Triggered ingest: {}", response.trim());
+    Ok(response)
 }
 
 fn trigger_full_ingest(socket: &str) -> Result<String> {
-    uds_request(socket, "INGEST_ALL")
+    let response = uds_request(socket, "INGEST_ALL")?;
+    info!("Triggered full ingest: {}", response.trim());
+    Ok(response)
 }
 
 fn collect_metrics(socket: &str) -> Result<String> {
-    uds_request(socket, "COLLECT_METRICS")
+    let response = uds_request(socket, "COLLECT_METRICS")?;
+    info!("Collected metrics: {}", response.trim());
+    Ok(response)
 }
 
 fn generate_report(socket: &str, since: u64, format: &str) -> Result<String> {
     let cmd = format!("REPORT GENERATE since={} format={}", since, format);
-    uds_request(socket, &cmd)
+    let response = uds_request(socket, &cmd)?;
+    info!("Generated report: {}", response.trim());
+    Ok(response)
 }
 
 fn trigger_indexing(socket: &str, since: u64, limit: Option<usize>) -> Result<String> {
@@ -839,7 +881,9 @@ fn trigger_indexing(socket: &str, since: u64, limit: Option<usize>) -> Result<St
     } else {
         format!("INDEX since={}", since)
     };
-    uds_request(socket, &cmd)
+    let response = uds_request(socket, &cmd)?;
+    info!("Triggered indexing: {}", response.trim());
+    Ok(response)
 }
 
 fn run_security_audit(socket: &str, tool: Option<&str>) -> Result<String> {
@@ -848,7 +892,9 @@ fn run_security_audit(socket: &str, tool: Option<&str>) -> Result<String> {
     } else {
         "AUDIT FULL".to_string()
     };
-    uds_request(socket, &cmd)
+    let response = uds_request(socket, &cmd)?;
+    info!("Ran security audit: {}", response.trim());
+    Ok(response)
 }
 
 // UI rendering functions
@@ -1875,6 +1921,7 @@ fn handle_key_event(app: &mut App, key: event::KeyEvent, socket: &str) -> Result
                                         app.status = "Search completed".to_string();
                                     }
                                     Err(e) => {
+                                        error!("Search failed: {}", e);
                                         app.show_error = Some(format!("Search failed: {}", e))
                                     }
                                 }
@@ -1901,7 +1948,7 @@ fn handle_key_event(app: &mut App, key: event::KeyEvent, socket: &str) -> Result
                                         app.chat_messages.push(response);
                                         app.status = "Message sent successfully".to_string();
                                     }
-                                    Err(e) => app.show_error = Some(format!("Chat failed: {}", e)),
+                                    Err(e) => { error!("Chat failed: {}", e); app.show_error = Some(format!("Chat failed: {}", e)); },
                                 }
                             }
                             app.input_mode = InputMode::Normal;
@@ -1990,11 +2037,11 @@ fn handle_logs_keys(app: &mut App, key: event::KeyEvent, socket: &str) -> Result
         }
         KeyCode::Char('i') => match trigger_ingest(socket, 300, Some(500)) {
             Ok(resp) => app.status = format!("Quick ingest: {}", resp.trim()),
-            Err(e) => app.show_error = Some(format!("Ingest failed: {}", e)),
+            Err(e) => { error!("Ingest failed: {}", e); app.show_error = Some(format!("Ingest failed: {}", e)); },
         },
         KeyCode::Char('I') => match trigger_full_ingest(socket) {
             Ok(resp) => app.status = format!("Full ingest: {}", resp.trim()),
-            Err(e) => app.show_error = Some(format!("Full ingest failed: {}", e)),
+            Err(e) => { error!("Full ingest failed: {}", e); app.show_error = Some(format!("Full ingest failed: {}", e)); },
         },
         _ => {}
     }
@@ -2236,6 +2283,14 @@ fn refresh_data(app: &mut App, socket: &str) -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    let log_file = File::create("/tmp/chimera_tui_debug.log")?;
+    let writer = BufWriter::new(log_file);
+
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .target(env_logger::Target::Pipe(Box::new(writer)))
+        .init();
+
+    debug!("TUI application started.");
     // Initialize
     let socket =
         std::env::var("CHIMERA_API_SOCKET").unwrap_or_else(|_| "/run/chimera/api.sock".to_string());

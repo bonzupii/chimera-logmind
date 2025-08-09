@@ -45,12 +45,12 @@ except Exception as _log_exc:
 # --- End Logging Setup ---
 
 try:
-    from .db import get_connection, initialize_schema
+    from .db import get_connection, initialize_schema, clear_table
     from .ingest import ingest_journal_into_duckdb
     from .config import ChimeraConfig
     from .ingest_framework import IngestionFramework
     from .embeddings import SemanticSearchEngine, AnomalyDetector, RAGChatEngine
-    from .system_health import SystemHealthMonitor
+    from .system_health import SystemHealthMonitor, SystemMetricsCollector
 except Exception as e:
     logger.error(f"Failed to import modules: {e}")
     # Fallback to relative imports when executed directly
@@ -59,7 +59,7 @@ except Exception as e:
     from config import ChimeraConfig
     from ingest_framework import IngestionFramework
     from embeddings import SemanticSearchEngine, AnomalyDetector, RAGChatEngine
-    from system_health import SystemHealthMonitor
+    from system_health import SystemHealthMonitor, SystemMetricsCollector
     logger.warning("Using fallback relative imports.")
 
 
@@ -92,7 +92,7 @@ def ensure_dir(path: str) -> None:
 
 def set_permissions(path: str) -> None:
     """Set secure permissions on socket file - only owner can read/write"""
-    os.chmod(path, 0o600)
+    os.chmod(path, 0o660)
 
 
 APP_VERSION = "0.1.0"
@@ -666,7 +666,7 @@ def _handle_collect_metrics(conn: socket.socket, db_path: Optional[str], tokens:
     """Handle COLLECT_METRICS command"""
     # Usage: COLLECT_METRICS
     try:
-        from system_health import SystemMetricsCollector
+        from .system_health import SystemMetricsCollector
         collector = SystemMetricsCollector(db_path)
         metrics = collector.collect_all_metrics()
         stored = collector.store_metrics(metrics)
@@ -1147,6 +1147,7 @@ def main() -> None:
     try:
         _init_conn = get_connection(DEFAULT_DB_PATH)
         initialize_schema(_init_conn)
+        clear_table(_init_conn, 'ingest_state')
         try:
             _init_conn.close()
         except Exception:
