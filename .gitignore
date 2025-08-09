@@ -1,0 +1,22 @@
+# Rust
+/cli/target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+
+# Data/runtime
+/data/
+/tmp/
+/run/
+/var/lib/chimera/
+*.duckdb*
+
+# IDE
+.vscode/
+.idea/

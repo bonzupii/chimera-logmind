@@ -1,0 +1,118 @@
+openapi: 3.0.3
+info:
+  title: Chimera LogMind API
+  version: 0.1.0
+  description: Minimal API over Unix Domain Socket. Commands are line-delimited requests.
+servers:
+  - url: http://unix/
+    description: Placeholder; communication occurs over UDS at /run/chimera/api.sock
+paths:
+  /ping:
+    post:
+      summary: Ping the server
+      responses:
+        '200':
+          description: Pong
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: PONG
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: OK
+  /version:
+    get:
+      summary: Version info
+      responses:
+        '200':
+          description: Semantic version string
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: 0.1.0
+
+  /ingest/journal:
+    post:
+      summary: Ingest recent journald entries into DuckDB
+      parameters:
+        - in: query
+          name: seconds
+          schema:
+            type: integer
+            default: 3600
+          description: Look back window in seconds
+        - in: query
+          name: limit
+          schema:
+            type: integer
+          description: Optional limit on number of entries
+      responses:
+        '200':
+          description: Ingest result
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: OK inserted=123 total=4567
+
+  /query/logs:
+    get:
+      summary: Query logs with structured filters
+      parameters:
+        - in: query
+          name: since
+          schema:
+            type: integer
+            default: 3600
+          description: Look back window in seconds
+        - in: query
+          name: min_severity
+          schema:
+            type: string
+            enum: [emerg, alert, crit, err, warning, notice, info, debug]
+        - in: query
+          name: source
+          schema:
+            type: string
+        - in: query
+          name: unit
+          schema:
+            type: string
+        - in: query
+          name: hostname
+          schema:
+            type: string
+        - in: query
+          name: contains
+          schema:
+            type: string
+          description: Substring match on message
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: JSON lines of log entries
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+                example: '{"ts":"2025-08-08 12:00:00","hostname":"host","source":"journald","unit":"sshd.service","severity":"info","pid":123,"message":"Accepted password..."}\n'
