@@ -73,8 +73,8 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut tab_index = 0usize; // 0: Logs, 1: Search, 2: Health, 3: Actions
-    let titles = vec!["Logs", "Search", "Health", "Actions"]; 
+    let mut tab_index = 0usize; // 0: Logs, 1: Search, 2: Health, 3: Chat, 4: Reports, 5: Security, 6: Actions
+    let titles = vec!["Logs", "Search", "Health", "Chat", "Reports", "Security", "Actions"]; 
     let mut logs: Vec<LogItem> = Vec::new();
     let mut status = String::new();
     let mut selected = 0usize;
@@ -126,6 +126,21 @@ fn main() -> Result<()> {
                 2 => {
                     let help = Paragraph::new("System Health: Use CLI 'chimera metrics' and 'chimera alerts' to view system health")
                         .block(Block::default().borders(Borders::ALL).title("System Health"));
+                    f.render_widget(help, chunks[1]);
+                }
+                3 => {
+                    let help = Paragraph::new("RAG Chat: Use CLI 'chimera chat query --query \"your question\"' for AI-powered log analysis")
+                        .block(Block::default().borders(Borders::ALL).title("AI Chat"));
+                    f.render_widget(help, chunks[1]);
+                }
+                4 => {
+                    let help = Paragraph::new("Reports: Use CLI 'chimera report generate' to create daily reports")
+                        .block(Block::default().borders(Borders::ALL).title("Reports"));
+                    f.render_widget(help, chunks[1]);
+                }
+                5 => {
+                    let help = Paragraph::new("Security: Use CLI 'chimera audit full' to run security audits")
+                        .block(Block::default().borders(Borders::ALL).title("Security Audits"));
                     f.render_widget(help, chunks[1]);
                 }
                 _ => {

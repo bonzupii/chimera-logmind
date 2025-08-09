@@ -403,3 +403,146 @@ class AnomalyDetector:
             
         finally:
             conn.close()
+
+
+class RAGChatEngine:
+    """RAG (Retrieval-Augmented Generation) chat engine for log analysis"""
+    
+    def __init__(self, db_path: Optional[str] = None, 
+                 ollama_url: str = "http://localhost:11434",
+                 ollama_model: str = "llama2",
+                 chroma_persist_dir: str = "/var/lib/chimera/chromadb"):
+        self.db_path = db_path
+        self.ollama_url = ollama_url.rstrip('/')
+        self.ollama_model = ollama_model
+        self.search_engine = SemanticSearchEngine(
+            db_path=db_path,
+            ollama_url=ollama_url,
+            ollama_model="nomic-embed-text",
+            chroma_persist_dir=chroma_persist_dir
+        )
+        self.session = requests.Session()
+        self.session.timeout = 60
+    
+    def _call_ollama(self, prompt: str) -> Optional[str]:
+        """Call Ollama LLM API"""
+        try:
+            response = self.session.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": self.ollama_model,
+                    "prompt": prompt,
+                    "stream": False
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("response", "").strip()
+        except Exception as e:
+            print(f"Error calling Ollama: {e}")
+            return None
+    
+    def _get_relevant_logs(self, query: str, context_size: int = 10, since_seconds: int = 3600) -> List[Dict[str, Any]]:
+        """Get relevant logs for the query"""
+        try:
+            return self.search_engine.search_logs(
+                query=query,
+                n_results=context_size,
+                since_seconds=since_seconds
+            )
+        except Exception as e:
+            print(f"Error searching logs: {e}")
+            return []
+    
+    def _format_log_context(self, logs: List[Dict[str, Any]]) -> str:
+        """Format logs as context for the LLM"""
+        if not logs:
+            return "No relevant logs found."
+        
+        context_lines = ["Relevant log entries:"]
+        for i, log in enumerate(logs, 1):
+            context_lines.append(
+                f"{i}. [{log.get('ts', '')}] {log.get('unit', '')} ({log.get('severity', '')}): {log.get('message', '')}"
+            )
+        
+        return "\n".join(context_lines)
+    
+    def chat(self, query: str, context_size: int = 10, since_seconds: int = 3600) -> str:
+        """Single chat interaction with log context"""
+        # Get relevant logs
+        relevant_logs = self._get_relevant_logs(query, context_size, since_seconds)
+        log_context = self._format_log_context(relevant_logs)
+        
+        # Create prompt
+        prompt = f"""You are a helpful assistant analyzing system logs. Use the following log entries to answer the user's question.
+
+{log_context}
+
+User question: {query}
+
+Please provide a clear, concise answer based on the log data. If the logs don't contain relevant information, say so. Focus on:
+- Identifying patterns or issues
+- Explaining what the logs indicate
+- Suggesting potential causes or solutions
+- Highlighting any concerning patterns
+
+Answer:"""
+        
+        # Get response from LLM
+        response = self._call_ollama(prompt)
+        if response is None:
+            return "Sorry, I couldn't generate a response. Please check if Ollama is running and the model is available."
+        
+        return response
+    
+    def start_session(self, context_size: int = 10, since_seconds: int = 3600) -> Dict[str, Any]:
+        """Start an interactive chat session"""
+        return {
+            "session_id": f"chat_{int(time.time())}",
+            "context_size": context_size,
+            "since_seconds": since_seconds,
+            "instructions": "Use 'chimera chat --query \"your question\"' to ask questions about the logs.",
+            "example_queries": [
+                "What errors occurred in the last hour?",
+                "Show me authentication failures",
+                "Are there any unusual patterns in the systemd logs?",
+                "What services are having issues?",
+                "Analyze the network connection logs"
+            ]
+        }
+    
+    def interactive_chat(self, context_size: int = 10, since_seconds: int = 3600) -> None:
+        """Interactive chat session (for future CLI enhancement)"""
+        print("Chimera LogMind Chat Session")
+        print("Type 'quit' to exit, 'help' for examples")
+        print("-" * 50)
+        
+        session_info = self.start_session(context_size, since_seconds)
+        print(f"Session started with context size: {context_size}, time window: {since_seconds}s")
+        print()
+        
+        while True:
+            try:
+                query = input("You: ").strip()
+                if not query:
+                    continue
+                
+                if query.lower() in ['quit', 'exit', 'q']:
+                    break
+                
+                if query.lower() == 'help':
+                    print("\nExample queries:")
+                    for example in session_info["example_queries"]:
+                        print(f"  - {example}")
+                    print()
+                    continue
+                
+                print("Analyzing logs...")
+                response = self.chat(query, context_size, since_seconds)
+                print(f"Assistant: {response}\n")
+                
+            except KeyboardInterrupt:
+                print("\nGoodbye!")
+                break
+            except Exception as e:
+                print(f"Error: {e}")

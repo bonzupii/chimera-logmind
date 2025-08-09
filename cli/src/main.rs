@@ -103,6 +103,107 @@ enum Commands {
         #[arg(long)]
         acknowledged: Option<bool>,
     },
+    /// Interactive RAG chat with log data
+    Chat {
+        #[command(subcommand)]
+        mode: ChatMode,
+    },
+    /// Generate and manage reports
+    Report {
+        #[command(subcommand)]
+        action: ReportAction,
+    },
+    /// Security auditing and integrity checks
+    Audit {
+        #[command(subcommand)]
+        action: AuditAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ChatMode {
+    /// Single query mode
+    Query {
+        /// Query to ask about logs
+        #[arg(long)]
+        query: String,
+        /// Number of log entries to include in context (default: 10)
+        #[arg(long, default_value_t = 10)]
+        context_size: i64,
+        /// Look back window in seconds for context (default: 3600)
+        #[arg(long, default_value_t = 3600)]
+        since: i64,
+    },
+    /// Interactive chat session
+    Interactive {
+        /// Number of log entries to include in context (default: 10)
+        #[arg(long, default_value_t = 10)]
+        context_size: i64,
+        /// Look back window in seconds for context (default: 3600)
+        #[arg(long, default_value_t = 3600)]
+        since: i64,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ReportAction {
+    /// Generate a daily report
+    Generate {
+        /// Look back window in seconds (default: 86400)
+        #[arg(long, default_value_t = 86400)]
+        since: i64,
+        /// Output format (text, html, json)
+        #[arg(long, default_value = "text")]
+        format: String,
+        /// Save to file
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Send report via email
+    Send {
+        /// Recipient email address
+        #[arg(long)]
+        to: String,
+        /// Look back window in seconds (default: 86400)
+        #[arg(long, default_value_t = 86400)]
+        since: i64,
+        /// Email subject
+        #[arg(long)]
+        subject: Option<String>,
+    },
+    /// List available reports
+    List {
+        /// Number of reports to show (default: 10)
+        #[arg(long, default_value_t = 10)]
+        limit: i64,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum AuditAction {
+    /// Run full security audit
+    Full,
+    /// Run specific security tool
+    Tool {
+        /// Tool name (auditd, aide, rkhunter, chkrootkit, clamav, openscap, lynis)
+        #[arg(long)]
+        tool: String,
+    },
+    /// Get audit history
+    History {
+        /// Tool name (optional)
+        #[arg(long)]
+        tool: Option<String>,
+        /// Number of results (default: 50)
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+    },
+    /// Get detailed audit result
+    Details {
+        /// Audit ID
+        #[arg(long)]
+        id: i64,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -348,6 +449,91 @@ fn main() -> Result<()> {
             let cmd = parts.join(" ");
             let response = send_request(&cli.socket, &cmd)?;
             print!("{}", response);
+        }
+        Commands::Chat { mode } => match mode {
+            ChatMode::Query { query, context_size, since } => {
+                let mut parts = vec![
+                    "CHAT".into(),
+                    format!("query={}", urlencoding::encode(query)),
+                    format!("context_size={}", context_size),
+                    format!("since={}", since),
+                ];
+                let cmd = parts.join(" ");
+                let response = send_request(&cli.socket, &cmd)?;
+                print!("{}", response);
+            }
+            ChatMode::Interactive { context_size, since } => {
+                let mut parts = vec![
+                    "CHAT".into(),
+                    format!("context_size={}", context_size),
+                    format!("since={}", since),
+                ];
+                let cmd = parts.join(" ");
+                let response = send_request(&cli.socket, &cmd)?;
+                print!("{}", response);
+            }
+        }
+        Commands::Report { action } => match action {
+            ReportAction::Generate { since, format, output } => {
+                let mut parts = vec![
+                    "REPORT GENERATE".into(),
+                    format!("since={}", since),
+                    format!("format={}", format),
+                ];
+                if let Some(out) = output {
+                    parts.push(format!("output={}", out));
+                }
+                let cmd = parts.join(" ");
+                let response = send_request(&cli.socket, &cmd)?;
+                print!("{}", response);
+            }
+            ReportAction::Send { to, since, subject } => {
+                let mut parts = vec![
+                    "REPORT SEND".into(),
+                    format!("to={}", urlencoding::encode(to)),
+                    format!("since={}", since),
+                ];
+                if let Some(subj) = subject {
+                    parts.push(format!("subject={}", urlencoding::encode(subj)));
+                }
+                let cmd = parts.join(" ");
+                let response = send_request(&cli.socket, &cmd)?;
+                println!("{}", response.trim_end());
+            }
+            ReportAction::List { limit } => {
+                let cmd = format!("REPORT LIST limit={}", limit);
+                let response = send_request(&cli.socket, &cmd)?;
+                print!("{}", response);
+            }
+        }
+        Commands::Audit { action } => match action {
+            AuditAction::Full => {
+                let cmd = "AUDIT FULL";
+                let response = send_request(&cli.socket, &cmd)?;
+                print!("{}", response);
+            }
+            AuditAction::Tool { tool } => {
+                let cmd = format!("AUDIT TOOL tool={}", tool);
+                let response = send_request(&cli.socket, &cmd)?;
+                print!("{}", response);
+            }
+            AuditAction::History { tool, limit } => {
+                let mut parts = vec![
+                    "AUDIT HISTORY".into(),
+                    format!("limit={}", limit),
+                ];
+                if let Some(t) = tool {
+                    parts.push(format!("tool={}", t));
+                }
+                let cmd = parts.join(" ");
+                let response = send_request(&cli.socket, &cmd)?;
+                print!("{}", response);
+            }
+            AuditAction::Details { id } => {
+                let cmd = format!("AUDIT DETAILS id={}", id);
+                let response = send_request(&cli.socket, &cmd)?;
+                print!("{}", response);
+            }
         }
     }
 

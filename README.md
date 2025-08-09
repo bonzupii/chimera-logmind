@@ -12,6 +12,11 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
   - `anomalies` for log anomaly detection
   - `metrics` and `alerts` for system health monitoring
   - `config` commands for log source management
+  - `chat query --query "text"` for RAG-powered log analysis with local LLM
+  - `report generate` for comprehensive daily reports
+  - `report send --to email` for email delivery
+  - `audit full` for comprehensive security auditing
+  - `audit tool --tool aide|rkhunter|clamav|lynis` for specific security tools
 - Python backend (`api/server.py`) listening on `/run/chimera/api.sock` (or `CHIMERA_API_SOCKET`)
   - Concurrency via threads
   - DuckDB storage + schema initialization
@@ -22,7 +27,7 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
   - Anomaly detection for log patterns
   - System health monitoring with metrics and alerts
   - Configuration management for log sources
-- Minimal TUI (`chimera-tui`) with tabs for logs, search, health, and actions
+- Minimal TUI (`chimera-tui`) with tabs for logs, search, health, chat, reports, security, and actions
 - Ops: installer and systemd unit for production use
 
 ## Quickstart (development)
@@ -82,6 +87,14 @@ newgrp chimera
 - `COLLECT_METRICS` → `OK collected=N`
 - `ALERTS [since=SEC] [severity=…] [acknowledged=BOOL]` → NDJSON
 - `CONFIG GET|LIST|ADD_SOURCE|REMOVE_SOURCE|UPDATE_SOURCE` → JSON/OK
+- `CHAT query="text" [context_size=N] [since=SEC]` → JSON
+- `REPORT GENERATE [since=SEC] [format=text|html|json] [output=PATH]` → text/html/json
+- `REPORT SEND to=EMAIL [since=SEC] [subject=SUBJECT]` → OK/ERR
+- `REPORT LIST [limit=N]` → NDJSON
+- `AUDIT FULL` → JSON
+- `AUDIT TOOL tool=TOOL_NAME` → JSON
+- `AUDIT HISTORY [tool=TOOL] [limit=N]` → NDJSON
+- `AUDIT DETAILS id=ID` → JSON
 
 ## Environment variables
 - `CHIMERA_API_SOCKET` (default `/run/chimera/api.sock`)
@@ -99,8 +112,11 @@ newgrp chimera
 - `contains` uses a simple `ILIKE` filter; for large-scale search, consider DuckDB FTS in a future phase
 - Cursor-based ingest avoids duplicates and reprocessing
 - Semantic search requires Ollama with nomic-embed-text model
+- RAG chat requires Ollama with llama2 or similar LLM model
 - System health monitoring requires psutil and systemd access
 - ChromaDB stores embeddings in `/var/lib/chimera/chromadb`
+- Security auditing requires installation of auditd, aide, rkhunter, chkrootkit, clamav, openscap, and lynis
+- Report delivery requires Exim4 or similar mail server
 
 ## License
 TBD
