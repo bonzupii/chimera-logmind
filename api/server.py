@@ -12,13 +12,19 @@ from typing import Optional
 try:
     from .db import get_connection, initialize_schema  # type: ignore
     from .ingest import ingest_journal_into_duckdb  # type: ignore
+    from .config import ChimeraConfig  # type: ignore
+    from .ingest_framework import IngestionFramework  # type: ignore
 except Exception:
     # Fallback to relative imports when executed directly
     from db import get_connection, initialize_schema  # type: ignore
     from ingest import ingest_journal_into_duckdb  # type: ignore
+    from config import ChimeraConfig  # type: ignore
+    from ingest_framework import IngestionFramework  # type: ignore
 
-DEFAULT_SOCKET_PATH = os.environ.get("CHIMERA_API_SOCKET", "/run/chimera/api.sock")
-DEFAULT_DB_PATH = os.environ.get("CHIMERA_DB_PATH")
+# Load configuration
+config = ChimeraConfig.load()
+DEFAULT_SOCKET_PATH = config.socket_path
+DEFAULT_DB_PATH = config.db_path
 
 
 def cleanup_socket(path: str) -> None:
@@ -237,6 +243,135 @@ def handle_client(conn: socket.socket, db_path: Optional[str]) -> None:
                             db_conn.close()
                         except Exception:
                             pass
+        elif command.startswith("CONFIG"):
+            # Usage: CONFIG GET|SET|LIST|ADD_SOURCE|REMOVE_SOURCE|UPDATE_SOURCE
+            try:
+                if len(tokens) < 2:
+                    conn.sendall(b"ERR config-subcommand-required\n")
+                    return
+                
+                subcmd = tokens[1].lower()
+                
+                if subcmd == "get":
+                    # CONFIG GET
+                    conn.sendall((json.dumps(config.to_dict()) + "\n").encode())
+                
+                elif subcmd == "list":
+                    # CONFIG LIST
+                    sources = []
+                    for source in config.log_sources:
+                        sources.append({
+                            "name": source.name,
+                            "type": source.type,
+                            "enabled": source.enabled,
+                            "config": source.config
+                        })
+                    conn.sendall((json.dumps({"sources": sources}) + "\n").encode())
+                
+                elif subcmd == "add_source":
+                    # CONFIG ADD_SOURCE name=NAME type=TYPE enabled=BOOL config=JSON
+                    if len(tokens) < 3:
+                        conn.sendall(b"ERR source-params-required\n")
+                        return
+                    
+                    args = {}
+                    for tok in tokens[2:]:
+                        if "=" in tok:
+                            k, v = tok.split("=", 1)
+                            if k == "config":
+                                try:
+                                    args[k] = json.loads(v)
+                                except json.JSONDecodeError:
+                                    conn.sendall(b"ERR invalid-config-json\n")
+                                    return
+                            elif k == "enabled":
+                                args[k] = v.lower() == "true"
+                            else:
+                                args[k] = v
+                    
+                    if "name" not in args or "type" not in args:
+                        conn.sendall(b"ERR name-and-type-required\n")
+                        return
+                    
+                    from config import LogSource
+                    new_source = LogSource(**args)
+                    config.add_source(new_source)
+                    config.save()
+                    conn.sendall(b"OK source-added\n")
+                
+                elif subcmd == "remove_source":
+                    # CONFIG REMOVE_SOURCE name=NAME
+                    if len(tokens) < 3:
+                        conn.sendall(b"ERR source-name-required\n")
+                        return
+                    
+                    name = tokens[2].split("=", 1)[1] if "=" in tokens[2] else tokens[2]
+                    if config.remove_source(name):
+                        config.save()
+                        conn.sendall(b"OK source-removed\n")
+                    else:
+                        conn.sendall(b"ERR source-not-found\n")
+                
+                elif subcmd == "update_source":
+                    # CONFIG UPDATE_SOURCE name=NAME enabled=BOOL config=JSON
+                    if len(tokens) < 3:
+                        conn.sendall(b"ERR source-name-required\n")
+                        return
+                    
+                    args = {}
+                    name = None
+                    for tok in tokens[2:]:
+                        if "=" in tok:
+                            k, v = tok.split("=", 1)
+                            if k == "name":
+                                name = v
+                            elif k == "config":
+                                try:
+                                    args[k] = json.loads(v)
+                                except json.JSONDecodeError:
+                                    conn.sendall(b"ERR invalid-config-json\n")
+                                    return
+                            elif k == "enabled":
+                                args[k] = v.lower() == "true"
+                            else:
+                                args[k] = v
+                    
+                    if not name:
+                        conn.sendall(b"ERR source-name-required\n")
+                        return
+                    
+                    if config.update_source(name, **args):
+                        config.save()
+                        conn.sendall(b"OK source-updated\n")
+                    else:
+                        conn.sendall(b"ERR source-not-found\n")
+                
+                else:
+                    conn.sendall(b"ERR unknown-config-subcommand\n")
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("INGEST_ALL"):
+            # Ingest from all enabled sources
+            try:
+                framework = IngestionFramework(db_path)
+                total_inserted = 0
+                total_sources = 0
+                
+                for source in config.get_enabled_sources():
+                    try:
+                        inserted, _ = framework.ingest_source(source, last_seconds=3600, limit=1000)
+                        total_inserted += inserted
+                        total_sources += 1
+                    except Exception as exc:
+                        # Log error but continue with other sources
+                        print(f"Error ingesting {source.name}: {exc}", file=sys.stderr)
+                
+                conn.sendall(f"OK inserted={total_inserted} sources={total_sources}\n".encode())
+                
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
         else:
             conn.sendall(b"ERR unknown command\n")
     finally:

@@ -36,6 +36,11 @@ enum Commands {
         #[command(subcommand)]
         target: QueryTarget,
     },
+    /// Manage configuration
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -49,6 +54,8 @@ enum IngestTarget {
         #[arg(long)]
         limit: Option<i64>,
     },
+    /// Ingest from all enabled sources
+    All,
 }
 
 #[derive(Subcommand, Debug)]
@@ -82,6 +89,47 @@ enum QueryTarget {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum ConfigAction {
+    /// List all log sources
+    List,
+    /// Get full configuration
+    Get,
+    /// Add a new log source
+    AddSource {
+        /// Source name
+        #[arg(long)]
+        name: String,
+        /// Source type (journald, file, container)
+        #[arg(long)]
+        source_type: String,
+        /// Whether source is enabled
+        #[arg(long, default_value_t = true)]
+        enabled: bool,
+        /// Source configuration as JSON
+        #[arg(long)]
+        config: Option<String>,
+    },
+    /// Remove a log source
+    RemoveSource {
+        /// Source name
+        #[arg(long)]
+        name: String,
+    },
+    /// Update a log source
+    UpdateSource {
+        /// Source name
+        #[arg(long)]
+        name: String,
+        /// Whether source is enabled
+        #[arg(long)]
+        enabled: Option<bool>,
+        /// Source configuration as JSON
+        #[arg(long)]
+        config: Option<String>,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -106,6 +154,10 @@ fn main() -> Result<()> {
                     format!("INGEST_JOURNAL {}", seconds)
                 };
                 let response = send_request(&cli.socket, &cmd)?;
+                println!("{}", response.trim_end());
+            }
+            IngestTarget::All => {
+                let response = send_request(&cli.socket, "INGEST_ALL")?;
                 println!("{}", response.trim_end());
             }
         },
@@ -134,6 +186,50 @@ fn main() -> Result<()> {
                 let cmd = parts.join(" ");
                 let response = send_request(&cli.socket, &cmd)?;
                 print!("{}", response);
+            }
+        },
+        Commands::Config { action } => match action {
+            ConfigAction::List => {
+                let response = send_request(&cli.socket, "CONFIG LIST")?;
+                print!("{}", response);
+            }
+            ConfigAction::Get => {
+                let response = send_request(&cli.socket, "CONFIG GET")?;
+                print!("{}", response);
+            }
+            ConfigAction::AddSource { name, source_type, enabled, config } => {
+                let mut parts = vec![
+                    "CONFIG ADD_SOURCE".into(),
+                    format!("name={}", name),
+                    format!("type={}", source_type),
+                    format!("enabled={}", enabled),
+                ];
+                if let Some(cfg) = config {
+                    parts.push(format!("config={}", cfg));
+                }
+                let cmd = parts.join(" ");
+                let response = send_request(&cli.socket, &cmd)?;
+                println!("{}", response.trim_end());
+            }
+            ConfigAction::RemoveSource { name } => {
+                let cmd = format!("CONFIG REMOVE_SOURCE name={}", name);
+                let response = send_request(&cli.socket, &cmd)?;
+                println!("{}", response.trim_end());
+            }
+            ConfigAction::UpdateSource { name, enabled, config } => {
+                let mut parts = vec![
+                    "CONFIG UPDATE_SOURCE".into(),
+                    format!("name={}", name),
+                ];
+                if let Some(en) = enabled {
+                    parts.push(format!("enabled={}", en));
+                }
+                if let Some(cfg) = config {
+                    parts.push(format!("config={}", cfg));
+                }
+                let cmd = parts.join(" ");
+                let response = send_request(&cli.socket, &cmd)?;
+                println!("{}", response.trim_end());
             }
         },
     }
