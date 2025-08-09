@@ -103,6 +103,7 @@ def handle_client(conn: socket.socket, db_path: Optional[str]) -> None:
         if not data:
             return
         text = data.decode(errors="ignore").strip()
+        logger.debug(f"Received command: {text}")
         tokens = text.split()
         command = tokens[0].upper() if tokens else ""
         if command.startswith("PING"):
