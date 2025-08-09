@@ -12,6 +12,8 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
   - `anomalies` for log anomaly detection
   - `metrics` and `alerts` for system health monitoring
   - `config` commands for log source management
+  - `chat --query "question"` for RAG-powered conversational log analysis
+  - `generate-report`, `save-report`, and `email-report` for automated reporting
 - Python backend (`api/server.py`) listening on `/run/chimera/api.sock` (or `CHIMERA_API_SOCKET`)
   - Concurrency via threads
   - DuckDB storage + schema initialization
@@ -22,7 +24,7 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
   - Anomaly detection for log patterns
   - System health monitoring with metrics and alerts
   - Configuration management for log sources
-- Minimal TUI (`chimera-tui`) with tabs for logs, search, health, and actions
+- Minimal TUI (`chimera-tui`) with tabs for logs, search, health, chat, and actions
 - Ops: installer and systemd unit for production use
 
 ## Quickstart (development)
@@ -82,6 +84,12 @@ newgrp chimera
 - `COLLECT_METRICS` → `OK collected=N`
 - `ALERTS [since=SEC] [severity=…] [acknowledged=BOOL]` → NDJSON
 - `CONFIG GET|LIST|ADD_SOURCE|REMOVE_SOURCE|UPDATE_SOURCE` → JSON/OK
+- `CHAT <query> [session_id=SESSION_ID]` → JSON
+- `CHAT_HISTORY [session_id=SESSION_ID] [limit=N]` → JSONL
+- `CLEAR_CHAT [session_id=SESSION_ID]` → OK
+- `GENERATE_REPORT [format=json|text|html] [output_dir=DIR]` → JSON/text/html
+- `SAVE_REPORT [output_dir=DIR]` → OK saved=PATH
+- `EMAIL_REPORT recipient=EMAIL [subject=SUBJECT] [output_dir=DIR]` → OK sent-to=EMAIL
 
 ## Environment variables
 - `CHIMERA_API_SOCKET` (default `/run/chimera/api.sock`)
@@ -101,6 +109,9 @@ newgrp chimera
 - Semantic search requires Ollama with nomic-embed-text model
 - System health monitoring requires psutil and systemd access
 - ChromaDB stores embeddings in `/var/lib/chimera/chromadb`
+- RAG chat provides conversational log analysis with natural language queries
+- Daily reports are automatically generated at 6 AM via systemd timer
+- Email delivery requires local mail system (sendmail or SMTP)
 
 ## License
 TBD

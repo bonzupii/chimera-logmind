@@ -103,6 +103,57 @@ enum Commands {
         #[arg(long)]
         acknowledged: Option<bool>,
     },
+    /// Chat with RAG-powered log analysis
+    Chat {
+        /// Chat query
+        #[arg(long)]
+        query: String,
+        /// Session ID for conversation continuity
+        #[arg(long)]
+        session_id: Option<String>,
+    },
+    /// Get chat history
+    ChatHistory {
+        /// Session ID to filter history
+        #[arg(long)]
+        session_id: Option<String>,
+        /// Limit number of entries (default: 50)
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+    },
+    /// Clear chat history
+    ClearChat {
+        /// Session ID to clear (if not specified, clears all)
+        #[arg(long)]
+        session_id: Option<String>,
+    },
+    /// Generate daily report
+    GenerateReport {
+        /// Output directory for saved reports
+        #[arg(long)]
+        output_dir: Option<String>,
+        /// Report format (json, text, html)
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
+    /// Save daily report to files
+    SaveReport {
+        /// Output directory for saved reports
+        #[arg(long)]
+        output_dir: Option<String>,
+    },
+    /// Email daily report
+    EmailReport {
+        /// Email recipient
+        #[arg(long)]
+        recipient: String,
+        /// Email subject (optional)
+        #[arg(long)]
+        subject: Option<String>,
+        /// Output directory for saved reports
+        #[arg(long)]
+        output_dir: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -348,6 +399,71 @@ fn main() -> Result<()> {
             let cmd = parts.join(" ");
             let response = send_request(&cli.socket, &cmd)?;
             print!("{}", response);
+        }
+        Commands::Chat { query, session_id } => {
+            let mut parts = vec![
+                "CHAT".into(),
+                query,
+            ];
+            if let Some(sid) = session_id { parts.push(format!("session_id={}", sid)); }
+            let cmd = parts.join(" ");
+            let response = send_request(&cli.socket, &cmd)?;
+            
+            // Parse and format the JSON response
+            if let Ok(json_response) = serde_json::from_str::<serde_json::Value>(&response.trim()) {
+                if let Some(resp_text) = json_response.get("response").and_then(|v| v.as_str()) {
+                    println!("{}", resp_text);
+                } else {
+                    println!("{}", response.trim());
+                }
+            } else {
+                println!("{}", response.trim());
+            }
+        }
+        Commands::ChatHistory { session_id, limit } => {
+            let mut parts = vec![
+                "CHAT_HISTORY".into(),
+                format!("limit={}", limit),
+            ];
+            if let Some(sid) = session_id { parts.push(format!("session_id={}", sid)); }
+            let cmd = parts.join(" ");
+            let response = send_request(&cli.socket, &cmd)?;
+            print!("{}", response);
+        }
+        Commands::ClearChat { session_id } => {
+            let mut parts = vec!["CLEAR_CHAT".into()];
+            if let Some(sid) = session_id { parts.push(format!("session_id={}", sid)); }
+            let cmd = parts.join(" ");
+            let response = send_request(&cli.socket, &cmd)?;
+            println!("{}", response.trim_end());
+        }
+        Commands::GenerateReport { output_dir, format } => {
+            let mut parts = vec![
+                "GENERATE_REPORT".into(),
+                format!("format={}", format),
+            ];
+            if let Some(od) = output_dir { parts.push(format!("output_dir={}", od)); }
+            let cmd = parts.join(" ");
+            let response = send_request(&cli.socket, &cmd)?;
+            print!("{}", response);
+        }
+        Commands::SaveReport { output_dir } => {
+            let mut parts = vec!["SAVE_REPORT".into()];
+            if let Some(od) = output_dir { parts.push(format!("output_dir={}", od)); }
+            let cmd = parts.join(" ");
+            let response = send_request(&cli.socket, &cmd)?;
+            println!("{}", response.trim_end());
+        }
+        Commands::EmailReport { recipient, subject, output_dir } => {
+            let mut parts = vec![
+                "EMAIL_REPORT".into(),
+                format!("recipient={}", recipient),
+            ];
+            if let Some(subj) = subject { parts.push(format!("subject={}", subj)); }
+            if let Some(od) = output_dir { parts.push(format!("output_dir={}", od)); }
+            let cmd = parts.join(" ");
+            let response = send_request(&cli.socket, &cmd)?;
+            println!("{}", response.trim_end());
         }
     }
 

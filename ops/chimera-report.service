@@ -1,0 +1,21 @@
+[Unit]
+Description=Chimera LogMind Daily Report Generator
+Documentation=https://github.com/chimera-logmind/chimera-core
+After=chimera-api.service
+Requires=chimera-api.service
+
+[Service]
+Type=oneshot
+User=chimera
+Group=chimera
+Environment=CHIMERA_API_SOCKET=/run/chimera/api.sock
+Environment=CHIMERA_DB_PATH=/var/lib/chimera/chimera.duckdb
+Environment=CHIMERA_CONFIG_PATH=/etc/chimera/config.json
+ExecStart=/usr/local/bin/chimera save-report --output-dir /var/lib/chimera/reports
+# Optional: Add email delivery
+# ExecStartPost=/usr/local/bin/chimera email-report --recipient admin@example.com --output-dir /var/lib/chimera/reports
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

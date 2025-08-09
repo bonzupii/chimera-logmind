@@ -1,0 +1,12 @@
+[Unit]
+Description=Chimera LogMind Daily Report Timer
+Documentation=https://github.com/chimera-logmind/chimera-core
+Wants=chimera-api.service
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

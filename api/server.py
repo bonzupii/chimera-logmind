@@ -16,6 +16,8 @@ try:
     from .ingest_framework import IngestionFramework  # type: ignore
     from .embeddings import SemanticSearchEngine, AnomalyDetector  # type: ignore
     from .system_health import SystemHealthMonitor  # type: ignore
+    from .rag_chat import RAGChatEngine  # type: ignore
+    from .reporting import ReportGenerator, ReportScheduler  # type: ignore
 except Exception:
     # Fallback to relative imports when executed directly
     from db import get_connection, initialize_schema  # type: ignore
@@ -24,6 +26,8 @@ except Exception:
     from ingest_framework import IngestionFramework  # type: ignore
     from embeddings import SemanticSearchEngine, AnomalyDetector  # type: ignore
     from system_health import SystemHealthMonitor  # type: ignore
+    from rag_chat import RAGChatEngine  # type: ignore
+    from reporting import ReportGenerator, ReportScheduler  # type: ignore
 
 # Load configuration
 config = ChimeraConfig.load()
@@ -533,6 +537,151 @@ def handle_client(conn: socket.socket, db_path: Optional[str]) -> None:
                 for alert in alerts:
                     conn.sendall((json.dumps(alert) + "\n").encode())
                     
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("CHAT"):
+            # Usage: CHAT <query> [session_id=SESSION_ID]
+            try:
+                if len(tokens) < 2:
+                    conn.sendall(b"ERR missing-query\n")
+                    return
+                
+                # Extract query and session_id
+                query_parts = tokens[1:]
+                session_id = None
+                
+                # Check for session_id parameter
+                for i, part in enumerate(query_parts):
+                    if part.startswith("session_id="):
+                        session_id = part.split("=", 1)[1]
+                        query_parts = query_parts[:i] + query_parts[i+1:]
+                        break
+                
+                query = " ".join(query_parts)
+                
+                chat_engine = RAGChatEngine(db_path, config)
+                response = chat_engine.chat(query, session_id)
+                conn.sendall((json.dumps(response) + "\n").encode())
+                
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("CHAT_HISTORY"):
+            # Usage: CHAT_HISTORY [session_id=SESSION_ID] [limit=N]
+            try:
+                args = {}
+                for tok in tokens[1:]:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        if k == "limit":
+                            args[k] = int(v)
+                        else:
+                            args[k] = v
+                
+                session_id = args.get("session_id")
+                limit = args.get("limit", 50)
+                
+                chat_engine = RAGChatEngine(db_path, config)
+                history = chat_engine.get_chat_history(session_id, limit)
+                
+                # Stream history as JSONL
+                for entry in history:
+                    conn.sendall((json.dumps(entry) + "\n").encode())
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("CLEAR_CHAT"):
+            # Usage: CLEAR_CHAT [session_id=SESSION_ID]
+            try:
+                session_id = None
+                for tok in tokens[1:]:
+                    if tok.startswith("session_id="):
+                        session_id = tok.split("=", 1)[1]
+                        break
+                
+                chat_engine = RAGChatEngine(db_path, config)
+                success = chat_engine.clear_chat_history(session_id)
+                
+                if success:
+                    conn.sendall(b"OK\n")
+                else:
+                    conn.sendall(b"ERR failed-to-clear\n")
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("GENERATE_REPORT"):
+            # Usage: GENERATE_REPORT [output_dir=DIR] [format=json|text|html]
+            try:
+                args = {}
+                for tok in tokens[1:]:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        args[k] = v
+                
+                output_dir = args.get("output_dir", "/var/lib/chimera/reports")
+                report_format = args.get("format", "json")
+                
+                generator = ReportGenerator(db_path, config)
+                report = generator.generate_daily_report()
+                
+                if report_format == "text":
+                    content = generator.format_report_as_text(report)
+                    conn.sendall(content.encode())
+                elif report_format == "html":
+                    content = generator.format_report_as_html(report)
+                    conn.sendall(content.encode())
+                else:  # json
+                    conn.sendall((json.dumps(report) + "\n").encode())
+                
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("SAVE_REPORT"):
+            # Usage: SAVE_REPORT [output_dir=DIR]
+            try:
+                output_dir = "/var/lib/chimera/reports"
+                for tok in tokens[1:]:
+                    if tok.startswith("output_dir="):
+                        output_dir = tok.split("=", 1)[1]
+                        break
+                
+                generator = ReportGenerator(db_path, config)
+                report = generator.generate_daily_report()
+                report_path = generator.save_report(report, output_dir)
+                
+                conn.sendall(f"OK saved={report_path}\n".encode())
+                
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("EMAIL_REPORT"):
+            # Usage: EMAIL_REPORT recipient=EMAIL [subject=SUBJECT] [output_dir=DIR]
+            try:
+                args = {}
+                for tok in tokens[1:]:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        args[k] = v
+                
+                recipient = args.get("recipient")
+                if not recipient:
+                    conn.sendall(b"ERR missing-recipient\n")
+                    return
+                
+                subject = args.get("subject")
+                output_dir = args.get("output_dir", "/var/lib/chimera/reports")
+                
+                scheduler = ReportScheduler(db_path, config)
+                success = scheduler.generate_and_email_daily_report(recipient, output_dir)
+                
+                if success:
+                    conn.sendall(f"OK sent-to={recipient}\n".encode())
+                else:
+                    conn.sendall(f"ERR failed-to-send\n".encode())
+                
             except Exception as exc:
                 conn.sendall(f"ERR {exc}\n".encode())
         
