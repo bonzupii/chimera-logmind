@@ -1,11 +1,10 @@
-import os
-import tempfile
-import socket
-import threading
-import time
 import contextlib
-import duckdb
 import pytest
+
+try:
+    import duckdb
+except ImportError:
+    duckdb = None
 
 
 @pytest.fixture()
@@ -16,6 +15,8 @@ def temp_db_path(tmp_path):
 
 @pytest.fixture()
 def duckdb_conn(temp_db_path):
+    if duckdb is None:
+        pytest.skip("duckdb not installed")
     conn = duckdb.connect(temp_db_path, read_only=False)
     try:
         yield conn

@@ -41,45 +41,40 @@ def get_connection(db_path: Optional[str] = None):
     return conn
 
 
-def initialize_schema(conn) -> None:
-    logger.info("Initializing database schema...")
-
-    def ensure_column_exists(table_name: str, column_name: str, column_type: str) -> None:
-        """Add a column only if it does not already exist (avoids startup warnings).
-
-        Uses pragma_table_info('table') to check columns.
-        """
+def _ensure_column_exists(conn, table_name: str, column_name: str, column_type: str) -> None:
+    """Add a column only if it does not already exist (avoids startup warnings)."""
+    try:
+        # Use a literal for table name (we only call with trusted names)
+        exists = (
+            conn.execute(
+                f"SELECT COUNT(*) FROM pragma_table_info('{table_name}') WHERE name = ?",
+                [column_name],
+            ).fetchone()[0]
+            > 0
+        )
+    except Exception as e:
+        logger.warning(f"Failed to check column existence for {table_name}.{column_name}: {e}")
+        exists = False
+    if not exists:
         try:
-            # Use a literal for table name (we only call with trusted names)
-            exists = (
-                conn.execute(
-                    f"SELECT COUNT(*) FROM pragma_table_info('{table_name}') WHERE name = ?",
-                    [column_name],
-                ).fetchone()[0]
-                > 0
-            )
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+            logger.debug(f"Added '{column_name}' column to '{table_name}' table.")
         except Exception as e:
-            logger.warning(f"Failed to check column existence for {table_name}.{column_name}: {e}")
-            exists = False
-        if not exists:
-            try:
-                conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
-                logger.debug(f"Added '{column_name}' column to '{table_name}' table.")
-            except Exception as e:
-                # If this fails, surface it once here rather than warn every startup
-                logger.warning(
-                    f"Could not add '{column_name}' column to '{table_name}' table: {e}"
-                )
+            logger.warning(
+                f"Could not add '{column_name}' column to '{table_name}' table: {e}"
+            )
 
-    # Best-effort: if an older installation exists, make sure required columns exist
+
+def _migrate_logs_table(conn) -> None:
+    """Handle migration of existing logs table if needed."""
     try:
         table_exists = conn.execute(
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'logs'"
         ).fetchone()[0]
         if table_exists:
             # Ensure optional columns exist (pre-migration)
-            ensure_column_exists("logs", "fingerprint", "TEXT")
-            ensure_column_exists("logs", "cursor", "TEXT")
+            _ensure_column_exists(conn, "logs", "fingerprint", "TEXT")
+            _ensure_column_exists(conn, "logs", "cursor", "TEXT")
             # If id column missing, migrate to new table with synthetic IDs
             id_missing = (
                 conn.execute(
@@ -113,7 +108,7 @@ def initialize_schema(conn) -> None:
                 conn.execute(
                     """
                     INSERT INTO logs_new (id, ts, hostname, source, unit, facility, severity, pid, uid, gid, message, raw, fingerprint, cursor)
-                    SELECT 
+                    SELECT
                         CAST(hash(COALESCE(fingerprint, hostname || source || unit || COALESCE(severity,'') || COALESCE(CAST(pid AS VARCHAR),'') || COALESCE(message,'') || COALESCE(CAST(ts AS VARCHAR),''))) AS BIGINT) as id,
                         ts, hostname, source, unit, facility, severity, pid, uid, gid, message, raw, fingerprint, cursor
                     FROM logs
@@ -125,6 +120,10 @@ def initialize_schema(conn) -> None:
     except Exception as e:
         logger.warning(f"Pre-migration checks failed or skipped: {e}")
 
+
+def _create_tables(conn) -> None:
+    """Create all required database tables."""
+    # Create logs table
     try:
         conn.execute(
             """
@@ -150,6 +149,8 @@ def initialize_schema(conn) -> None:
     except Exception as e:
         logger.error(f"Error creating logs table: {e}")
         raise
+
+    # Create ingest_state table
     try:
         conn.execute(
             """
@@ -164,6 +165,8 @@ def initialize_schema(conn) -> None:
     except Exception as e:
         logger.error(f"Error creating ingest_state table: {e}")
         raise
+
+    # Create log_embeddings table
     try:
         conn.execute(
             """
@@ -178,63 +181,54 @@ def initialize_schema(conn) -> None:
     except Exception as e:
         logger.error(f"Error creating log_embeddings table: {e}")
         raise
+
+
+def _create_indexes(conn) -> None:
+    """Create all required database indexes."""
+    indexes = [
+        ("idx_logs_ts", "logs(ts)"),
+        ("idx_logs_unit", "logs(unit)"),
+        ("idx_logs_hostname", "logs(hostname)"),
+        ("idx_logs_severity", "logs(severity)"),
+    ]
+
+    unique_indexes = [
+        ("uidx_logs_cursor", "logs(cursor)"),
+        ("uidx_logs_fingerprint", "logs(fingerprint)"),
+    ]
+
+    # Create regular indexes
+    for index_name, index_def in indexes:
+        try:
+            conn.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {index_def};")
+            logger.debug(f"Index '{index_name}' created or already exists.")
+        except Exception as e:
+            logger.warning(f"Could not create index '{index_name}': {e}")
+
+    # Create unique indexes
+    for index_name, index_def in unique_indexes:
+        try:
+            conn.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {index_def};")
+            logger.debug(f"Unique index '{index_name}' created or already exists.")
+        except Exception as e:
+            logger.warning(f"Could not create unique index '{index_name}': {e}")
+
+
+def initialize_schema(conn) -> None:
+    """Initialize database schema with tables and indexes."""
+    logger.info("Initializing database schema...")
+
+    # Handle migration of existing installations
+    _migrate_logs_table(conn)
+
+    # Create all tables
+    _create_tables(conn)
+
     # Backfill columns for existing installations (idempotent, without warnings)
-    ensure_column_exists("logs", "fingerprint", "TEXT")
-    ensure_column_exists("logs", "cursor", "TEXT")
-    
-    try:
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts);
-            """
-        )
-        logger.debug("Index 'idx_logs_ts' created or already exists.")
-    except Exception as e:
-        logger.warning(f"Could not create index 'idx_logs_ts': {e}")
-    try:
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_logs_unit ON logs(unit);
-            """
-        )
-        logger.debug("Index 'idx_logs_unit' created or already exists.")
-    except Exception as e:
-        logger.warning(f"Could not create index 'idx_logs_unit': {e}")
-    try:
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_logs_hostname ON logs(hostname);
-            """
-        )
-        logger.debug("Index 'idx_logs_hostname' created or already exists.")
-    except Exception as e:
-        logger.warning(f"Could not create index 'idx_logs_hostname': {e}")
-    try:
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_logs_severity ON logs(severity);
-            """
-        )
-        logger.debug("Index 'idx_logs_severity' created or already exists.")
-    except Exception as e:
-        logger.warning(f"Could not create index 'idx_logs_severity': {e}")
-    # Uniqueness to prevent duplicates; NULLs are allowed and not considered equal
-    try:
-        conn.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS uidx_logs_cursor ON logs(cursor);
-            """
-        )
-        logger.debug("Unique index 'uidx_logs_cursor' created or already exists.")
-    except Exception as e:
-        logger.warning(f"Could not create unique index 'uidx_logs_cursor': {e}")
-    try:
-        conn.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS uidx_logs_fingerprint ON logs(fingerprint);
-            """
-        )
-        logger.debug("Unique index 'uidx_logs_fingerprint' created or already exists.")
-    except Exception as e:
-        logger.warning(f"Could not create unique index 'uidx_logs_fingerprint': {e}")
+    _ensure_column_exists(conn, "logs", "fingerprint", "TEXT")
+    _ensure_column_exists(conn, "logs", "cursor", "TEXT")
+
+    # Create all indexes
+    _create_indexes(conn)
+
     logger.info("Database schema initialization complete.")

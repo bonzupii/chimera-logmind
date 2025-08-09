@@ -1,5 +1,5 @@
 import duckdb
-import pytest
+
 from api.db import initialize_schema, get_connection
 
 

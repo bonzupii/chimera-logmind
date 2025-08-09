@@ -2,7 +2,7 @@ import json
 import subprocess
 import datetime as dt
 import duckdb
-import pytest
+
 
 from api.ingest_framework import IngestionFramework
 from api.db import initialize_schema

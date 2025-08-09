@@ -1,10 +1,9 @@
-import json
 import os
 import socket
 import threading
 import time
 import duckdb
-import pytest
+
 
 from api.server import main as server_main
 
@@ -41,7 +40,7 @@ def send_cmd(sock_path, line: str) -> bytes:
 def test_server_ping_and_query(temp_env_paths, temp_socket_path, monkeypatch):
     # Make server bind to temp socket instead of /run/chimera
     monkeypatch.setenv("CHIMERA_API_SOCKET", temp_socket_path)
-    thread = start_server_in_thread()
+    start_server_in_thread()
     assert wait_for_socket(temp_socket_path)
 
     # PING

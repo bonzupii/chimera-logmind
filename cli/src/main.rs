@@ -348,10 +348,18 @@ fn main() -> Result<()> {
                 order,
             } => {
                 let mut parts: Vec<String> = vec!["QUERY_LOGS".into(), format!("since={}", since)];
-                if let Some(v) = min_severity { parts.push(format!("min_severity={}", v)); }
-                if let Some(v) = source { parts.push(format!("source={}", v)); }
-                if let Some(v) = unit { parts.push(format!("unit={}", v)); }
-                if let Some(v) = hostname { parts.push(format!("hostname={}", v)); }
+                if let Some(v) = min_severity {
+                    parts.push(format!("min_severity={}", v));
+                }
+                if let Some(v) = source {
+                    parts.push(format!("source={}", v));
+                }
+                if let Some(v) = unit {
+                    parts.push(format!("unit={}", v));
+                }
+                if let Some(v) = hostname {
+                    parts.push(format!("hostname={}", v));
+                }
                 if let Some(v) = contains {
                     let enc = urlencoding::encode(&v);
                     parts.push(format!("contains={}", enc));
@@ -372,7 +380,12 @@ fn main() -> Result<()> {
                 let response = send_request(&cli.socket, "CONFIG GET")?;
                 print!("{}", response);
             }
-            ConfigAction::AddSource { name, source_type, enabled, config } => {
+            ConfigAction::AddSource {
+                name,
+                source_type,
+                enabled,
+                config,
+            } => {
                 let mut parts = vec![
                     "CONFIG ADD_SOURCE".into(),
                     format!("name={}", name),
@@ -391,11 +404,12 @@ fn main() -> Result<()> {
                 let response = send_request(&cli.socket, &cmd)?;
                 println!("{}", response.trim_end());
             }
-            ConfigAction::UpdateSource { name, enabled, config } => {
-                let mut parts = vec![
-                    "CONFIG UPDATE_SOURCE".into(),
-                    format!("name={}", name),
-                ];
+            ConfigAction::UpdateSource {
+                name,
+                enabled,
+                config,
+            } => {
+                let mut parts = vec!["CONFIG UPDATE_SOURCE".into(), format!("name={}", name)];
                 if let Some(en) = enabled {
                     parts.push(format!("enabled={}", en));
                 }
@@ -407,26 +421,40 @@ fn main() -> Result<()> {
                 println!("{}", response.trim_end());
             }
         },
-        Commands::Search { query, n_results, since, source, unit, severity } => {
+        Commands::Search {
+            query,
+            n_results,
+            since,
+            source,
+            unit,
+            severity,
+        } => {
             let mut parts = vec![
                 "SEARCH".into(),
                 format!("query={}", urlencoding::encode(&query)),
                 format!("n_results={}", n_results),
             ];
-            if let Some(s) = since { parts.push(format!("since={}", s)); }
-            if let Some(s) = source { parts.push(format!("source={}", s)); }
-            if let Some(u) = unit { parts.push(format!("unit={}", u)); }
-            if let Some(s) = severity { parts.push(format!("severity={}", s)); }
+            if let Some(s) = since {
+                parts.push(format!("since={}", s));
+            }
+            if let Some(s) = source {
+                parts.push(format!("source={}", s));
+            }
+            if let Some(u) = unit {
+                parts.push(format!("unit={}", u));
+            }
+            if let Some(s) = severity {
+                parts.push(format!("severity={}", s));
+            }
             let cmd = parts.join(" ");
             let response = send_request(&cli.socket, &cmd)?;
             print!("{}", response);
         }
         Commands::Index { since, limit } => {
-            let mut parts = vec![
-                "INDEX".into(),
-                format!("since={}", since),
-            ];
-            if let Some(l) = limit { parts.push(format!("limit={}", l)); }
+            let mut parts = vec!["INDEX".into(), format!("since={}", since)];
+            if let Some(l) = limit {
+                parts.push(format!("limit={}", l));
+            }
             let cmd = parts.join(" ");
             let response = send_request(&cli.socket, &cmd)?;
             println!("{}", response.trim_end());
@@ -436,13 +464,19 @@ fn main() -> Result<()> {
             let response = send_request(&cli.socket, &cmd)?;
             print!("{}", response);
         }
-        Commands::Metrics { metric_type, since, limit } => {
+        Commands::Metrics {
+            metric_type,
+            since,
+            limit,
+        } => {
             let mut parts = vec![
                 "METRICS".into(),
                 format!("since={}", since),
                 format!("limit={}", limit),
             ];
-            if let Some(mt) = metric_type { parts.push(format!("type={}", mt)); }
+            if let Some(mt) = metric_type {
+                parts.push(format!("type={}", mt));
+            }
             let cmd = parts.join(" ");
             let response = send_request(&cli.socket, &cmd)?;
             print!("{}", response);
@@ -451,19 +485,28 @@ fn main() -> Result<()> {
             let response = send_request(&cli.socket, "COLLECT_METRICS")?;
             println!("{}", response.trim_end());
         }
-        Commands::Alerts { since, severity, acknowledged } => {
-            let mut parts = vec![
-                "ALERTS".into(),
-                format!("since={}", since),
-            ];
-            if let Some(s) = severity { parts.push(format!("severity={}", s)); }
-            if let Some(a) = acknowledged { parts.push(format!("acknowledged={}", a)); }
+        Commands::Alerts {
+            since,
+            severity,
+            acknowledged,
+        } => {
+            let mut parts = vec!["ALERTS".into(), format!("since={}", since)];
+            if let Some(s) = severity {
+                parts.push(format!("severity={}", s));
+            }
+            if let Some(a) = acknowledged {
+                parts.push(format!("acknowledged={}", a));
+            }
             let cmd = parts.join(" ");
             let response = send_request(&cli.socket, &cmd)?;
             print!("{}", response);
         }
         Commands::Chat { mode } => match mode {
-            ChatMode::Query { query, context_size, since } => {
+            ChatMode::Query {
+                query,
+                context_size,
+                since,
+            } => {
                 let parts = vec![
                     "CHAT".into(),
                     format!("query={}", urlencoding::encode(&query)),
@@ -474,7 +517,10 @@ fn main() -> Result<()> {
                 let response = send_request(&cli.socket, &cmd)?;
                 print!("{}", response);
             }
-            ChatMode::Interactive { context_size, since } => {
+            ChatMode::Interactive {
+                context_size,
+                since,
+            } => {
                 let parts = vec![
                     "CHAT".into(),
                     format!("context_size={}", context_size),
@@ -484,7 +530,7 @@ fn main() -> Result<()> {
                 let response = send_request(&cli.socket, &cmd)?;
                 print!("{}", response);
             }
-        }
+        },
         Commands::ChatMessage { message } => {
             let cmd = format!("CHAT message={}", urlencoding::encode(&message));
             let response = send_request(&cli.socket, &cmd)?;
@@ -503,7 +549,11 @@ fn main() -> Result<()> {
             print!("{}", response);
         }
         Commands::Report { action } => match action {
-            ReportAction::Generate { since, format, output } => {
+            ReportAction::Generate {
+                since,
+                format,
+                output,
+            } => {
                 let mut parts = vec![
                     "REPORT GENERATE".into(),
                     format!("since={}", since),
@@ -534,7 +584,7 @@ fn main() -> Result<()> {
                 let response = send_request(&cli.socket, &cmd)?;
                 print!("{}", response);
             }
-        }
+        },
         Commands::Audit { action } => match action {
             AuditAction::Full => {
                 let cmd = "AUDIT FULL";
@@ -547,10 +597,7 @@ fn main() -> Result<()> {
                 print!("{}", response);
             }
             AuditAction::History { tool, limit } => {
-                let mut parts = vec![
-                    "AUDIT HISTORY".into(),
-                    format!("limit={}", limit),
-                ];
+                let mut parts = vec!["AUDIT HISTORY".into(), format!("limit={}", limit)];
                 if let Some(t) = tool {
                     parts.push(format!("tool={}", t));
                 }
@@ -563,7 +610,7 @@ fn main() -> Result<()> {
                 let response = send_request(&cli.socket, &cmd)?;
                 print!("{}", response);
             }
-        }
+        },
     }
 
     Ok(())

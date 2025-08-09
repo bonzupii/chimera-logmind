@@ -10,6 +10,22 @@ logger = logging.getLogger("chimera")
 JOURNALCTL_BIN = "journalctl"
 
 
+def validate_journald_cursor(cursor: str) -> bool:
+    """Validate journald cursor format to prevent command injection.
+
+    Journald cursors are base64-like strings with specific characters.
+    """
+    if not cursor or len(cursor) > 500:  # Reasonable length limit
+        return False
+
+    # Allow alphanumeric, +, /, =, -, and _ characters (base64 + journald specific)
+    import re
+    if not re.match(r'^[A-Za-z0-9+/=_-]+$', cursor):
+        return False
+
+    return True
+
+
 def _parse_priority(value: Optional[str]) -> Optional[str]:
     mapping = {
         "0": "emerg",
@@ -41,6 +57,11 @@ def _parse_realtime_timestamp(micros: Optional[str]) -> Optional[dt.datetime]:
 
 
 def _journalctl_json_lines(last_seconds: int, limit: Optional[int], after_cursor: Optional[str]) -> Iterable[dict]:
+    # Validate cursor parameter to prevent command injection
+    if after_cursor and not validate_journald_cursor(after_cursor):
+        logger.error(f"Invalid journald cursor format: {after_cursor[:50]}...")
+        raise ValueError("Invalid journald cursor format")
+
     cmd = [
         JOURNALCTL_BIN,
         "--no-pager",
@@ -55,7 +76,12 @@ def _journalctl_json_lines(last_seconds: int, limit: Optional[int], after_cursor
     if limit is not None and limit > 0:
         cmd.extend(["-n", str(limit)])
     logger.debug(f"Executing journalctl command: {' '.join(cmd)}")
-    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        logger.error("journalctl command timed out after 300 seconds")
+        raise RuntimeError("journalctl command timed out")
+
     if proc.returncode != 0:
         logger.error(f"journalctl failed with exit code {proc.returncode}: {proc.stderr.strip()}")
         raise RuntimeError(f"journalctl failed with exit code {proc.returncode}: {proc.stderr.strip()}")

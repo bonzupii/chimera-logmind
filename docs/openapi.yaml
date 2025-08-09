@@ -1,4 +1,4 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: Chimera LogMind API
   version: 0.1.0
@@ -11,7 +11,7 @@ paths:
     post:
       summary: Ping the server
       responses:
-        '200':
+        "200":
           description: Pong
           content:
             text/plain:
@@ -22,7 +22,7 @@ paths:
     get:
       summary: Health check
       responses:
-        '200':
+        "200":
           description: Server is healthy
           content:
             text/plain:
@@ -33,7 +33,7 @@ paths:
     get:
       summary: Version info
       responses:
-        '200':
+        "200":
           description: Semantic version string
           content:
             text/plain:
@@ -57,7 +57,7 @@ paths:
             type: integer
           description: Optional limit on number of entries
       responses:
-        '200':
+        "200":
           description: Ingest result
           content:
             text/plain:
@@ -109,7 +109,7 @@ paths:
             enum: [asc, desc]
             default: desc
       responses:
-        '200':
+        "200":
           description: JSON lines of log entries
           content:
             application/x-ndjson:

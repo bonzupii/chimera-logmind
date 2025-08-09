@@ -1,73 +1,71 @@
 #!/usr/bin/env python3
-import json
 import datetime as dt
 import subprocess
 import os
 import tempfile
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 from pathlib import Path
 
 from .db import get_connection
-from .embeddings import AnomalyDetector
 from .system_health import SystemHealthMonitor
 
 
 class ReportGenerator:
     """Generate comprehensive system reports"""
-    
+
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path
-        self.anomaly_detector = AnomalyDetector(db_path)
         self.health_monitor = SystemHealthMonitor(db_path)
-    
+
     def _get_log_summary(self, since_seconds: int = 86400) -> Dict[str, Any]:
         """Get summary statistics for logs"""
         conn = get_connection(self.db_path)
         try:
-            since_ts = dt.datetime.utcnow() - dt.timedelta(seconds=since_seconds)
-            
+            since_ts = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=since_seconds)
+
             cur = conn.cursor()
-            
+
             # Total log count
             cur.execute("SELECT COUNT(*) FROM logs WHERE ts >= ?", [since_ts])
-            total_logs = cur.fetchone()[0]
-            
+            total_logs_row = cur.fetchone()
+            total_logs = total_logs_row[0] if total_logs_row else 0
+
             # Logs by severity
             cur.execute("""
-                SELECT severity, COUNT(*) 
-                FROM logs 
-                WHERE ts >= ? 
-                GROUP BY severity 
+                SELECT severity, COUNT(*)
+                FROM logs
+                WHERE ts >= ?
+                GROUP BY severity
                 ORDER BY COUNT(*) DESC
             """, [since_ts])
             severity_counts = dict(cur.fetchall())
-            
+
             # Top units by log volume
             cur.execute("""
-                SELECT unit, COUNT(*) 
-                FROM logs 
-                WHERE ts >= ? 
-                GROUP BY unit 
-                ORDER BY COUNT(*) DESC 
+                SELECT unit, COUNT(*)
+                FROM logs
+                WHERE ts >= ?
+                GROUP BY unit
+                ORDER BY COUNT(*) DESC
                 LIMIT 10
             """, [since_ts])
             top_units = dict(cur.fetchall())
-            
+
             # Top sources
             cur.execute("""
-                SELECT source, COUNT(*) 
-                FROM logs 
-                WHERE ts >= ? 
-                GROUP BY source 
-                ORDER BY COUNT(*) DESC 
+                SELECT source, COUNT(*)
+                FROM logs
+                WHERE ts >= ?
+                GROUP BY source
+                ORDER BY COUNT(*) DESC
                 LIMIT 5
             """, [since_ts])
             top_sources = dict(cur.fetchall())
-            
+
             # Error rate
             error_count = sum(severity_counts.get(sev, 0) for sev in ['err', 'crit', 'emerg'])
             error_rate = (error_count / total_logs * 100) if total_logs > 0 else 0
-            
+
             return {
                 "total_logs": total_logs,
                 "severity_distribution": severity_counts,
@@ -77,10 +75,10 @@ class ReportGenerator:
                 "error_rate": round(error_rate, 2),
                 "period_hours": since_seconds // 3600
             }
-            
+
         finally:
             conn.close()
-    
+
     def _get_system_health_summary(self, since_seconds: int = 86400) -> Dict[str, Any]:
         """Get system health summary"""
         try:
@@ -89,21 +87,21 @@ class ReportGenerator:
                 since_seconds=since_seconds,
                 limit=1000
             )
-            
+
             if not metrics:
                 return {"status": "no_data", "message": "No system metrics available"}
-            
+
             # Calculate averages
             cpu_avg = sum(m.get('cpu_percent', 0) for m in metrics) / len(metrics)
             memory_avg = sum(m.get('memory_percent', 0) for m in metrics) / len(metrics)
             disk_avg = sum(m.get('disk_percent', 0) for m in metrics) / len(metrics)
-            
+
             # Get current alerts
             alerts = self.health_monitor.get_alerts(
                 since_seconds=since_seconds,
                 acknowledged=False
             )
-            
+
             return {
                 "cpu_average": round(cpu_avg, 2),
                 "memory_average": round(memory_avg, 2),
@@ -118,47 +116,92 @@ class ReportGenerator:
                     for alert in alerts[:5]  # Top 5 alerts
                 ]
             }
-            
+
         except Exception as e:
             return {"status": "error", "message": str(e)}
-    
+
     def _get_anomaly_summary(self, since_seconds: int = 86400) -> Dict[str, Any]:
         """Get anomaly detection summary"""
         try:
-            anomalies = self.anomaly_detector.detect_anomalies(since_seconds)
-            
-            # Group by type
-            anomaly_types = {}
-            for anomaly in anomalies:
-                anomaly_type = anomaly.get("type", "unknown")
-                if anomaly_type not in anomaly_types:
-                    anomaly_types[anomaly_type] = []
-                anomaly_types[anomaly_type].append(anomaly)
-            
-            return {
-                "total_anomalies": len(anomalies),
-                "anomaly_types": {
-                    anomaly_type: len(anomalies_list)
-                    for anomaly_type, anomalies_list in anomaly_types.items()
-                },
-                "high_severity": len([a for a in anomalies if a.get("severity") == "high"]),
-                "recent_anomalies": [
-                    {
-                        "type": a.get("type"),
-                        "severity": a.get("severity"),
-                        "description": a.get("description")
-                    }
-                    for a in anomalies[:5]  # Top 5 anomalies
-                ]
-            }
-            
+            # Simple inline anomaly detection
+            conn = get_connection(self.db_path)
+            try:
+                since_ts = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=since_seconds)
+                anomalies = []
+
+                # Detect error spikes
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT unit, COUNT(*) as error_count
+                    FROM logs
+                    WHERE ts >= ? AND severity IN ('err', 'crit', 'emerg')
+                    GROUP BY unit
+                    HAVING error_count > 10
+                    ORDER BY error_count DESC
+                """, [since_ts])
+
+                for unit, error_count in cur.fetchall():
+                    anomalies.append({
+                        "type": "error_spike",
+                        "severity": "high",
+                        "description": f"High error rate in {unit}: {error_count} errors"
+                    })
+
+                # Detect high volume
+                cur.execute("""
+                    SELECT source, COUNT(*) as log_count
+                    FROM logs
+                    WHERE ts >= ?
+                    GROUP BY source
+                    HAVING log_count > 1000
+                    ORDER BY log_count DESC
+                """, [since_ts])
+
+                for source, log_count in cur.fetchall():
+                    anomalies.append({
+                        "type": "high_volume",
+                        "severity": "medium",
+                        "description": f"High log volume from {source}: {log_count} logs"
+                    })
+
+                # Group by type
+                anomaly_types = {}
+                for anomaly in anomalies:
+                    anomaly_type = anomaly.get("type", "unknown")
+                    if anomaly_type not in anomaly_types:
+                        anomaly_types[anomaly_type] = []
+                    anomaly_types[anomaly_type].append(anomaly)
+
+                return {
+                    "total_anomalies": len(anomalies),
+                    "anomaly_types": {
+                        atype: len(items) for atype, items in anomaly_types.items()
+                    },
+                    "high_severity": len([
+                        a for a in anomalies if a.get("severity") == "high"
+                    ]),
+                    "medium_severity": len([
+                        a for a in anomalies if a.get("severity") == "medium"
+                    ]),
+                    "recent_anomalies": [
+                        {
+                            "type": a.get("type"),
+                            "severity": a.get("severity"),
+                            "description": a.get("description")
+                        }
+                        for a in anomalies[:5]  # Top 5 anomalies
+                    ]
+                }
+            finally:
+                conn.close()
+
         except Exception as e:
             return {"status": "error", "message": str(e)}
-    
+
     def generate_daily_report(self, since_seconds: int = 86400) -> Dict[str, Any]:
         """Generate a comprehensive daily report"""
-        report_time = dt.datetime.utcnow()
-        
+        report_time = dt.datetime.now(dt.timezone.utc)
+
         report = {
             "report_id": f"daily_{report_time.strftime('%Y%m%d')}",
             "generated_at": report_time.isoformat(),
@@ -169,39 +212,39 @@ class ReportGenerator:
                 "anomalies": self._get_anomaly_summary(since_seconds)
             }
         }
-        
+
         # Add recommendations
         recommendations = []
-        
+
         # Check error rate
         error_rate = report["summary"]["log_analytics"].get("error_rate", 0)
         if error_rate > 5:
             recommendations.append(f"High error rate detected: {error_rate}%. Review system logs for issues.")
-        
+
         # Check system health
         health = report["summary"]["system_health"]
         if health.get("cpu_average", 0) > 80:
             recommendations.append("High CPU usage detected. Consider investigating resource-intensive processes.")
-        
+
         if health.get("memory_average", 0) > 85:
             recommendations.append("High memory usage detected. Consider memory optimization or cleanup.")
-        
+
         if health.get("active_alerts", 0) > 0:
             recommendations.append(f"{health['active_alerts']} active alerts require attention.")
-        
+
         # Check anomalies
         anomalies = report["summary"]["anomalies"]
         if anomalies.get("high_severity", 0) > 0:
             recommendations.append(f"{anomalies['high_severity']} high-severity anomalies detected.")
-        
+
         report["recommendations"] = recommendations
-        
+
         return report
-    
+
     def format_report_as_text(self, report: Dict[str, Any]) -> str:
         """Format report as human-readable text"""
         lines = []
-        
+
         # Header
         lines.append("=" * 80)
         lines.append("CHIMERA LOGMIND DAILY REPORT")
@@ -209,7 +252,7 @@ class ReportGenerator:
         lines.append(f"Generated: {report['generated_at']}")
         lines.append(f"Period: {report['period_hours']} hours")
         lines.append("")
-        
+
         # Log Analytics
         log_data = report["summary"]["log_analytics"]
         lines.append("LOG ANALYTICS")
@@ -217,17 +260,17 @@ class ReportGenerator:
         lines.append(f"Total logs: {log_data['total_logs']:,}")
         lines.append(f"Error rate: {log_data['error_rate']}%")
         lines.append("")
-        
+
         lines.append("Severity Distribution:")
         for severity, count in log_data.get("severity_distribution", {}).items():
             lines.append(f"  {severity}: {count:,}")
         lines.append("")
-        
+
         lines.append("Top Units by Volume:")
         for unit, count in list(log_data.get("top_units", {}).items())[:5]:
             lines.append(f"  {unit}: {count:,}")
         lines.append("")
-        
+
         # System Health
         health_data = report["summary"]["system_health"]
         lines.append("SYSTEM HEALTH")
@@ -239,13 +282,13 @@ class ReportGenerator:
             lines.append(f"Memory Average: {health_data.get('memory_average', 0)}%")
             lines.append(f"Disk Average: {health_data.get('disk_average', 0)}%")
             lines.append(f"Active Alerts: {health_data.get('active_alerts', 0)}")
-            
+
             if health_data.get("alert_summary"):
                 lines.append("Recent Alerts:")
                 for alert in health_data["alert_summary"]:
                     lines.append(f"  [{alert['severity']}] {alert['message']}")
         lines.append("")
-        
+
         # Anomalies
         anomaly_data = report["summary"]["anomalies"]
         lines.append("ANOMALY DETECTION")
@@ -255,13 +298,13 @@ class ReportGenerator:
         else:
             lines.append(f"Total Anomalies: {anomaly_data.get('total_anomalies', 0)}")
             lines.append(f"High Severity: {anomaly_data.get('high_severity', 0)}")
-            
+
             if anomaly_data.get("recent_anomalies"):
                 lines.append("Recent Anomalies:")
                 for anomaly in anomaly_data["recent_anomalies"]:
                     lines.append(f"  [{anomaly['severity']}] {anomaly['description']}")
         lines.append("")
-        
+
         # Recommendations
         if report.get("recommendations"):
             lines.append("RECOMMENDATIONS")
@@ -269,13 +312,13 @@ class ReportGenerator:
             for i, rec in enumerate(report["recommendations"], 1):
                 lines.append(f"{i}. {rec}")
             lines.append("")
-        
+
         lines.append("=" * 80)
         lines.append("End of Report")
         lines.append("=" * 80)
-        
+
         return "\n".join(lines)
-    
+
     def format_report_as_html(self, report: Dict[str, Any]) -> str:
         """Format report as HTML"""
         html = f"""
@@ -302,7 +345,7 @@ class ReportGenerator:
         <p>Generated: {report['generated_at']} | Period: {report['period_hours']} hours</p>
     </div>
 """
-        
+
         # Log Analytics
         log_data = report["summary"]["log_analytics"]
         html += f"""
@@ -310,19 +353,19 @@ class ReportGenerator:
         <h2>Log Analytics</h2>
         <div class="metric"><strong>Total Logs:</strong> {log_data['total_logs']:,}</div>
         <div class="metric"><strong>Error Rate:</strong> {log_data['error_rate']}%</div>
-        
+
         <h3>Severity Distribution</h3>
         <table>
             <tr><th>Severity</th><th>Count</th></tr>
 """
         for severity, count in log_data.get("severity_distribution", {}).items():
             html += f"            <tr><td>{severity}</td><td>{count:,}</td></tr>\n"
-        
+
         html += """
         </table>
     </div>
 """
-        
+
         # System Health
         health_data = report["summary"]["system_health"]
         html += """
@@ -342,9 +385,9 @@ class ReportGenerator:
                 html += "        <h3>Recent Alerts</h3>\n"
                 for alert in health_data["alert_summary"]:
                     html += f'        <div class="alert"><strong>[{alert["severity"]}]</strong> {alert["message"]}</div>\n'
-        
+
         html += "    </div>\n"
-        
+
         # Anomalies
         anomaly_data = report["summary"]["anomalies"]
         html += """
@@ -362,9 +405,9 @@ class ReportGenerator:
                 html += "        <h3>Recent Anomalies</h3>\n"
                 for anomaly in anomaly_data["recent_anomalies"]:
                     html += f'        <div class="alert"><strong>[{anomaly["severity"]}]</strong> {anomaly["description"]}</div>\n'
-        
+
         html += "    </div>\n"
-        
+
         # Recommendations
         if report.get("recommendations"):
             html += """
@@ -374,7 +417,7 @@ class ReportGenerator:
             for i, rec in enumerate(report["recommendations"], 1):
                 html += f'        <div class="recommendation">{i}. {rec}</div>\n'
             html += "    </div>\n"
-        
+
         html += """
 </body>
 </html>
@@ -384,12 +427,12 @@ class ReportGenerator:
 
 class ReportDelivery:
     """Handle report delivery via email"""
-    
+
     def __init__(self, smtp_host: str = "localhost", smtp_port: int = 25):
         self.smtp_host = smtp_host
         self.smtp_port = smtp_port
-    
-    def send_report_email(self, report_text: str, report_html: str, 
+
+    def send_report_email(self, report_text: str, report_html: str,
                          to_email: str, subject: str = "Chimera LogMind Daily Report") -> bool:
         """Send report via email using Exim4"""
         try:
@@ -397,11 +440,11 @@ class ReportDelivery:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as txt_file:
                 txt_file.write(report_text)
                 txt_file_path = txt_file.name
-            
+
             with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as html_file:
                 html_file.write(report_html)
                 html_file_path = html_file.name
-            
+
             # Use Exim4 to send the email
             cmd = [
                 "exim4",
@@ -409,7 +452,7 @@ class ReportDelivery:
                 "-f", "chimera@localhost",  # From address
                 "-S", f"{self.smtp_host}:{self.smtp_port}"
             ]
-            
+
             # Create email content
             email_content = f"""To: {to_email}
 From: chimera@localhost
@@ -429,7 +472,7 @@ Content-Type: text/html; charset=utf-8
 
 --boundary--
 """
-            
+
             # Send email
             result = subprocess.run(
                 cmd,
@@ -437,42 +480,42 @@ Content-Type: text/html; charset=utf-8
                 capture_output=True,
                 text=True
             )
-            
+
             # Clean up temporary files
             os.unlink(txt_file_path)
             os.unlink(html_file_path)
-            
+
             if result.returncode == 0:
                 return True
             else:
                 print(f"Email delivery failed: {result.stderr}")
                 return False
-                
+
         except Exception as e:
             print(f"Error sending email: {e}")
             return False
-    
-    def save_report_to_file(self, report_text: str, report_html: str, 
+
+    def save_report_to_file(self, report_text: str, report_html: str,
                            output_dir: str = "/var/lib/chimera/reports") -> str:
         """Save report to files"""
         try:
             # Ensure output directory exists
             Path(output_dir).mkdir(parents=True, exist_ok=True)
-            
+
             # Generate filenames
             timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
             txt_file = Path(output_dir) / f"report_{timestamp}.txt"
             html_file = Path(output_dir) / f"report_{timestamp}.html"
-            
+
             # Write files
             with open(txt_file, 'w') as f:
                 f.write(report_text)
-            
+
             with open(html_file, 'w') as f:
                 f.write(report_html)
-            
+
             return str(txt_file)
-            
+
         except Exception as e:
             print(f"Error saving report: {e}")
             return ""

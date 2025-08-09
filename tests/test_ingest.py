@@ -1,11 +1,9 @@
 import json
 import subprocess
 import datetime as dt
-import types
 import duckdb
-import pytest
 
-from api.db import initialize_schema, get_connection
+from api.db import initialize_schema
 from api import ingest as ingest_mod
 
 
