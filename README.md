@@ -13,6 +13,8 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
   - `metrics` and `alerts` for system health monitoring
   - `config` commands for log source management
   - `chat query --query "text"` for RAG-powered log analysis with local LLM
+  - `chat --message "text"` for simple AI chat (legacy)
+  - `chat-history`, `chat-clear`, and `chat-stats` for chat management
   - `report generate` for comprehensive daily reports
   - `report send --to email` for email delivery
   - `audit full` for comprehensive security auditing
@@ -27,6 +29,8 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
   - Anomaly detection for log patterns
   - System health monitoring with metrics and alerts
   - Configuration management for log sources
+  - RAG (Retrieval-Augmented Generation) chat for intelligent log analysis
+  - Simple AI chat for basic interactions
 - Minimal TUI (`chimera-tui`) with tabs for logs, search, health, chat, reports, security, and actions
 - Ops: installer and systemd unit for production use
 
@@ -56,7 +60,7 @@ cargo build --manifest-path cli/Cargo.toml
 # Run the TUI (uses CHIMERA_API_SOCKET or defaults to /run/chimera/api.sock)
 ./cli/target/debug/chimera-tui
 ```
-Keys: q quit, ←/→ switch tabs, ↑/↓ select, r refresh, i ingest 5m, I ingest 1h.
+Keys: q quit, ←/→ switch tabs, ↑/↓ select, r refresh, i ingest 5m, I ingest 1h, c chat (in chat tab).
 
 ## Production install (systemd)
 Prereqs: `journalctl` access and DuckDB for Python.
@@ -86,6 +90,10 @@ newgrp chimera
 - `METRICS [type=TYPE] [since=SEC] [limit=N]` → NDJSON
 - `COLLECT_METRICS` → `OK collected=N`
 - `ALERTS [since=SEC] [severity=…] [acknowledged=BOOL]` → NDJSON
+- `CHAT message="text"` → JSON
+- `CHAT_HISTORY` → JSON
+- `CHAT_CLEAR` → `OK history-cleared`
+- `CHAT_STATS` → JSON
 - `CONFIG GET|LIST|ADD_SOURCE|REMOVE_SOURCE|UPDATE_SOURCE` → JSON/OK
 - `CHAT query="text" [context_size=N] [since=SEC]` → JSON
 - `REPORT GENERATE [since=SEC] [format=text|html|json] [output=PATH]` → text/html/json
@@ -112,7 +120,11 @@ newgrp chimera
 - `contains` uses a simple `ILIKE` filter; for large-scale search, consider DuckDB FTS in a future phase
 - Cursor-based ingest avoids duplicates and reprocessing
 - Semantic search requires Ollama with nomic-embed-text model
+<<<<<<< HEAD
 - RAG chat requires Ollama with llama2 or similar LLM model
+=======
+- RAG chat requires Ollama with llama2 model (or other compatible model)
+>>>>>>> origin/main
 - System health monitoring requires psutil and systemd access
 - ChromaDB stores embeddings in `/var/lib/chimera/chromadb`
 - Security auditing requires installation of auditd, aide, rkhunter, chkrootkit, clamav, openscap, and lynis
