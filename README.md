@@ -44,15 +44,16 @@ export CHIMERA_API_SOCKET=/tmp/chimera/api.sock
 export CHIMERA_DB_PATH=/tmp/chimera.duckdb
 export CHIMERA_LOG_LEVEL=DEBUG
 export CHIMERA_LOG_FILE=/tmp/chimera/api.log  # optional
-python3 api/server.py
+export PYTHONPATH=.
+python3 -m api.server
 ```
 
 ```bash
 # Terminal 2 (CLI)
 export CHIMERA_API_SOCKET=/tmp/chimera/api.sock
-cargo run --manifest-path cli/Cargo.toml -- ping
-cargo run --manifest-path cli/Cargo.toml -- ingest journal --seconds 300 --limit 100
-cargo run --manifest-path cli/Cargo.toml -- query logs --since 600 --limit 20
+cargo run --manifest-path cli/Cargo.toml --bin cli -- ping
+cargo run --manifest-path cli/Cargo.toml --bin cli -- ingest journal --seconds 300 --limit 100
+cargo run --manifest-path cli/Cargo.toml --bin cli -- query logs --since 600 --limit 20
 ```
 ### Testing
 

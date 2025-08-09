@@ -112,6 +112,8 @@ def ingest_journal_into_duckdb(conn, last_seconds: int = 3600, limit: Optional[i
         cur = conn.cursor()
         inserted_count = 0
         try:
+            # Get count before insert
+            count_before = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
             cur.executemany(
                 """
                 INSERT INTO logs (id, ts, hostname, source, unit, facility, severity, pid, uid, gid, message, raw, fingerprint, cursor)
@@ -120,8 +122,10 @@ def ingest_journal_into_duckdb(conn, last_seconds: int = 3600, limit: Optional[i
                 """,
                 rows,
             )
-            inserted_count = cur.rowcount # This might not be accurate for ON CONFLICT DO NOTHING
-            logger.info(f"Attempted to insert {len(rows)} journald entries. Actual inserted count may vary due to ON CONFLICT.")
+            # Get count after insert and calculate difference
+            count_after = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
+            inserted_count = count_after - count_before
+            logger.info(f"Attempted to insert {len(rows)} journald entries. Actual inserted count: {inserted_count}")
         except Exception as e:
             logger.error(f"Error during batch insert of journald logs: {e}")
             raise
