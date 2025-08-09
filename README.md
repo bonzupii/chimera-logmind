@@ -5,16 +5,24 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
 ## Features
 - Rust CLI (`chimera`) speaking a simple line protocol over a Unix domain socket
   - `ping`, `health`, `version`
-  - `ingest journal --seconds [--limit]`
+  - `ingest journal --seconds [--limit]` and `ingest all` for multi-source ingestion
   - `query logs` with filters: `since`, `min_severity`, `source`, `unit`, `hostname`, `contains`, `limit`, `order`
+  - `search --query "text"` for semantic log search
+  - `index` for embedding generation
+  - `anomalies` for log anomaly detection
+  - `metrics` and `alerts` for system health monitoring
+  - `config` commands for log source management
 - Python backend (`api/server.py`) listening on `/run/chimera/api.sock` (or `CHIMERA_API_SOCKET`)
   - Concurrency via threads
   - DuckDB storage + schema initialization
-  - Journald ingestion via `journalctl -o json`
+  - Multi-source ingestion: journald, log files, container logs
   - Cursor-based incremental ingest (persists `__CURSOR` in `ingest_state`)
   - Dedup via unique `cursor` and a message `fingerprint`
-  - `DISCOVER` command for units/hostnames/sources/severities with counts
-- Minimal TUI (`chimera-tui`) to trigger ingest and view recent logs
+  - Semantic search with Ollama embeddings and ChromaDB
+  - Anomaly detection for log patterns
+  - System health monitoring with metrics and alerts
+  - Configuration management for log sources
+- Minimal TUI (`chimera-tui`) with tabs for logs, search, health, and actions
 - Ops: installer and systemd unit for production use
 
 ## Quickstart (development)
@@ -64,12 +72,21 @@ newgrp chimera
 - `HEALTH` → `OK`
 - `VERSION` → `0.1.0`
 - `INGEST_JOURNAL <seconds> [limit]` → `OK inserted=N total=M`
+- `INGEST_ALL` → `OK inserted=N sources=M`
 - `QUERY_LOGS since=<sec> [min_severity=…] [source=…] [unit=…] [hostname=…] [contains=…] [limit=N] [order=asc|desc]` → NDJSON
 - `DISCOVER UNITS|HOSTNAMES|SOURCES|SEVERITIES [since=<sec>] [limit=N]` → NDJSON of `{value,count}`
+- `SEARCH query="text" [n_results=N] [since=SEC] [source=…] [unit=…] [severity=…]` → NDJSON
+- `INDEX [since=SEC] [limit=N]` → `OK indexed=N total=M`
+- `ANOMALIES [since=SEC]` → NDJSON
+- `METRICS [type=TYPE] [since=SEC] [limit=N]` → NDJSON
+- `COLLECT_METRICS` → `OK collected=N`
+- `ALERTS [since=SEC] [severity=…] [acknowledged=BOOL]` → NDJSON
+- `CONFIG GET|LIST|ADD_SOURCE|REMOVE_SOURCE|UPDATE_SOURCE` → JSON/OK
 
 ## Environment variables
 - `CHIMERA_API_SOCKET` (default `/run/chimera/api.sock`)
 - `CHIMERA_DB_PATH` (default `/var/lib/chimera/chimera.duckdb` in service; `data/chimera.duckdb` when run ad-hoc)
+- `CHIMERA_CONFIG_PATH` (default `/etc/chimera/config.json`)
 
 ## Repo layout
 - `cli/` — Rust CLI and TUI
@@ -81,6 +98,9 @@ newgrp chimera
 - The backend opens a fresh DuckDB connection per request
 - `contains` uses a simple `ILIKE` filter; for large-scale search, consider DuckDB FTS in a future phase
 - Cursor-based ingest avoids duplicates and reprocessing
+- Semantic search requires Ollama with nomic-embed-text model
+- System health monitoring requires psutil and systemd access
+- ChromaDB stores embeddings in `/var/lib/chimera/chromadb`
 
 ## License
 TBD
