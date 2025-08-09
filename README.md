@@ -24,7 +24,7 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
   - DuckDB storage + schema initialization
   - Multi-source ingestion: journald, log files, container logs
   - Cursor-based incremental ingest (persists `__CURSOR` in `ingest_state`)
-  - Dedup via unique `cursor` and a message `fingerprint`
+  - Dedup via unique `cursor` and a message `fingerprint`, with a deterministic 64-bit `id`
   - Semantic search with Ollama embeddings and ChromaDB
   - Anomaly detection for log patterns
   - System health monitoring with metrics and alerts
@@ -35,13 +35,15 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
 - Ops: installer and systemd unit for production use
 
 ## Quickstart (development)
-Use a user-writable socket to avoid root requirements during development.
+Use a user-writable socket to avoid root requirements during development. If `/run/chimera` is not writable, the server falls back to a per-user runtime dir under `/tmp`.
 
 ```bash
 # Terminal 1 (backend)
 python3 -m venv .venv && source .venv/bin/activate  # optional
 export CHIMERA_API_SOCKET=/tmp/chimera/api.sock
 export CHIMERA_DB_PATH=/tmp/chimera.duckdb
+export CHIMERA_LOG_LEVEL=DEBUG
+export CHIMERA_LOG_FILE=/tmp/chimera/api.log  # optional
 python3 api/server.py
 ```
 
@@ -51,6 +53,13 @@ export CHIMERA_API_SOCKET=/tmp/chimera/api.sock
 cargo run --manifest-path cli/Cargo.toml -- ping
 cargo run --manifest-path cli/Cargo.toml -- ingest journal --seconds 300 --limit 100
 cargo run --manifest-path cli/Cargo.toml -- query logs --since 600 --limit 20
+```
+### Testing
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+PYTHONPATH=. pytest -q
 ```
 
 ### TUI
@@ -108,6 +117,8 @@ newgrp chimera
 - `CHIMERA_API_SOCKET` (default `/run/chimera/api.sock`)
 - `CHIMERA_DB_PATH` (default `/var/lib/chimera/chimera.duckdb` in service; `data/chimera.duckdb` when run ad-hoc)
 - `CHIMERA_CONFIG_PATH` (default `/etc/chimera/config.json`)
+- `CHIMERA_LOG_LEVEL` (default `DEBUG`; affects both console and file handlers)
+- `CHIMERA_LOG_FILE` (optional; default `/var/log/chimera/api.log` when writable)
 
 ## Repo layout
 - `cli/` — Rust CLI and TUI
@@ -125,6 +136,11 @@ newgrp chimera
 - ChromaDB stores embeddings in `/var/lib/chimera/chromadb`
 - Security auditing requires installation of auditd, aide, rkhunter, chkrootkit, clamav, openscap, and lynis
 - Report delivery requires Exim4 or similar mail server
+
+### Ingestion configuration notes
+- Journald source supports `units: ["unit1", ...]` and `exclude_units: ["systemd-*", ...]` patterns.
+- Deterministic `logs.id` is a 64-bit integer derived from message fingerprint; existing deployments are auto-migrated.
+- DuckDB currently does not support ON DELETE CASCADE in foreign keys; `log_embeddings` references `logs(id)` without cascade.
 
 ## License
 TBD
