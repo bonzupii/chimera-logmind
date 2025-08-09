@@ -8,12 +8,17 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
   - `ingest journal --seconds [--limit]` and `ingest all` for multi-source ingestion
   - `query logs` with filters: `since`, `min_severity`, `source`, `unit`, `hostname`, `contains`, `limit`, `order`
   - `search --query "text"` for semantic log search
-- `index` for embedding generation
-- `anomalies` for log anomaly detection
-- `metrics` and `alerts` for system health monitoring
-- `config` commands for log source management
-- `chat --message "text"` for AI-powered log analysis chat
-- `chat-history`, `chat-clear`, and `chat-stats` for chat management
+  - `index` for embedding generation
+  - `anomalies` for log anomaly detection
+  - `metrics` and `alerts` for system health monitoring
+  - `config` commands for log source management
+  - `chat query --query "text"` for RAG-powered log analysis with local LLM
+  - `chat --message "text"` for simple AI chat (legacy)
+  - `chat-history`, `chat-clear`, and `chat-stats` for chat management
+  - `report generate` for comprehensive daily reports
+  - `report send --to email` for email delivery
+  - `audit full` for comprehensive security auditing
+  - `audit tool --tool aide|rkhunter|clamav|lynis` for specific security tools
 - Python backend (`api/server.py`) listening on `/run/chimera/api.sock` (or `CHIMERA_API_SOCKET`)
   - Concurrency via threads
   - DuckDB storage + schema initialization
@@ -21,11 +26,12 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
   - Cursor-based incremental ingest (persists `__CURSOR` in `ingest_state`)
   - Dedup via unique `cursor` and a message `fingerprint`
   - Semantic search with Ollama embeddings and ChromaDB
-- Anomaly detection for log patterns
-- System health monitoring with metrics and alerts
-- Configuration management for log sources
-- RAG (Retrieval-Augmented Generation) chat for intelligent log analysis
-- Minimal TUI (`chimera-tui`) with tabs for logs, search, health, chat, and actions
+  - Anomaly detection for log patterns
+  - System health monitoring with metrics and alerts
+  - Configuration management for log sources
+  - RAG (Retrieval-Augmented Generation) chat for intelligent log analysis
+  - Simple AI chat for basic interactions
+- Minimal TUI (`chimera-tui`) with tabs for logs, search, health, chat, reports, security, and actions
 - Ops: installer and systemd unit for production use
 
 ## Quickstart (development)
@@ -89,6 +95,14 @@ newgrp chimera
 - `CHAT_CLEAR` → `OK history-cleared`
 - `CHAT_STATS` → JSON
 - `CONFIG GET|LIST|ADD_SOURCE|REMOVE_SOURCE|UPDATE_SOURCE` → JSON/OK
+- `CHAT query="text" [context_size=N] [since=SEC]` → JSON
+- `REPORT GENERATE [since=SEC] [format=text|html|json] [output=PATH]` → text/html/json
+- `REPORT SEND to=EMAIL [since=SEC] [subject=SUBJECT]` → OK/ERR
+- `REPORT LIST [limit=N]` → NDJSON
+- `AUDIT FULL` → JSON
+- `AUDIT TOOL tool=TOOL_NAME` → JSON
+- `AUDIT HISTORY [tool=TOOL] [limit=N]` → NDJSON
+- `AUDIT DETAILS id=ID` → JSON
 
 ## Environment variables
 - `CHIMERA_API_SOCKET` (default `/run/chimera/api.sock`)
@@ -106,9 +120,15 @@ newgrp chimera
 - `contains` uses a simple `ILIKE` filter; for large-scale search, consider DuckDB FTS in a future phase
 - Cursor-based ingest avoids duplicates and reprocessing
 - Semantic search requires Ollama with nomic-embed-text model
+<<<<<<< HEAD
+- RAG chat requires Ollama with llama2 or similar LLM model
+=======
 - RAG chat requires Ollama with llama2 model (or other compatible model)
+>>>>>>> origin/main
 - System health monitoring requires psutil and systemd access
 - ChromaDB stores embeddings in `/var/lib/chimera/chromadb`
+- Security auditing requires installation of auditd, aide, rkhunter, chkrootkit, clamav, openscap, and lynis
+- Report delivery requires Exim4 or similar mail server
 
 ## License
 TBD

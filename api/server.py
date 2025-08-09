@@ -539,6 +539,189 @@ def handle_client(conn: socket.socket, db_path: Optional[str]) -> None:
                 conn.sendall(f"ERR {exc}\n".encode())
         
         elif command.startswith("CHAT"):
+            # Usage: CHAT [query=QUERY] [context_size=N] [since=SECONDS] or CHAT message=MESSAGE
+            try:
+                args = {}
+                for tok in tokens[1:]:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        args[k] = v
+                
+                # Check if this is a simple message chat or RAG query
+                if "message" in args:
+                    # Simple message chat (legacy)
+                    message = args["message"]
+                    from embeddings import RAGChatEngine
+                    chat_engine = RAGChatEngine(db_path)
+                    response = chat_engine.chat(message, context_size=5, since_seconds=3600)
+                    conn.sendall((json.dumps({"response": response}) + "\n").encode())
+                else:
+                    # RAG query mode
+                    query = args.get("query")
+                    context_size = int(args.get("context_size", 10))
+                    since_seconds = int(args.get("since", 3600))
+                    
+                    from embeddings import RAGChatEngine
+                    chat_engine = RAGChatEngine(db_path)
+                    
+                    if query:
+                        # Single query mode
+                        response = chat_engine.chat(query, context_size=context_size, since_seconds=since_seconds)
+                        conn.sendall((json.dumps({"response": response}) + "\n").encode())
+                    else:
+                        # Interactive mode - send session info
+                        session_info = chat_engine.start_session(context_size=context_size, since_seconds=since_seconds)
+                        conn.sendall((json.dumps({"session": session_info}) + "\n").encode())
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("CHAT_HISTORY"):
+            # Usage: CHAT_HISTORY
+            try:
+                from embeddings import RAGChatEngine
+                chat_engine = RAGChatEngine(db_path)
+                history = chat_engine.get_chat_history()
+                conn.sendall((json.dumps(history) + "\n").encode())
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("CHAT_CLEAR"):
+            # Usage: CHAT_CLEAR
+            try:
+                from embeddings import RAGChatEngine
+                chat_engine = RAGChatEngine(db_path)
+                chat_engine.clear_chat_history()
+                conn.sendall(b"OK history-cleared\n")
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("CHAT_STATS"):
+            # Usage: CHAT_STATS
+            try:
+                from embeddings import RAGChatEngine
+                chat_engine = RAGChatEngine(db_path)
+                stats = chat_engine.get_chat_stats()
+                conn.sendall((json.dumps(stats) + "\n").encode())
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("REPORT"):
+            # Usage: REPORT GENERATE|SEND|LIST [args...]
+            try:
+                if len(tokens) < 2:
+                    conn.sendall(b"ERR missing report action\n")
+                    return
+                
+                report_action = tokens[1].upper()
+                
+                if report_action == "GENERATE":
+                    # Usage: REPORT GENERATE [since=SECONDS] [format=FORMAT] [output=PATH]
+                    args = {}
+                    for tok in tokens[2:]:
+                        if "=" in tok:
+                            k, v = tok.split("=", 1)
+                            args[k] = v
+                    
+                    since_seconds = int(args.get("since", 86400))
+                    format_type = args.get("format", "text")
+                    output_path = args.get("output")
+                    
+                    from reporting import ReportGenerator, ReportDelivery
+                    generator = ReportGenerator(db_path)
+                    delivery = ReportDelivery()
+                    
+                    # Generate report
+                    report = generator.generate_daily_report(since_seconds)
+                    
+                    if format_type == "json":
+                        result = json.dumps(report, indent=2)
+                    elif format_type == "html":
+                        result = generator.format_report_as_html(report)
+                    else:  # text
+                        result = generator.format_report_as_text(report)
+                    
+                    # Save to file if requested
+                    if output_path:
+                        if format_type == "html":
+                            delivery.save_report_to_file("", result, output_path)
+                        else:
+                            delivery.save_report_to_file(result, "", output_path)
+                        conn.sendall(f"OK saved to {output_path}\n".encode())
+                    else:
+                        conn.sendall(result.encode())
+                
+                elif report_action == "SEND":
+                    # Usage: REPORT SEND [to=EMAIL] [since=SECONDS] [subject=SUBJECT]
+                    args = {}
+                    for tok in tokens[2:]:
+                        if "=" in tok:
+                            k, v = tok.split("=", 1)
+                            args[k] = v
+                    
+                    to_email = args.get("to")
+                    since_seconds = int(args.get("since", 86400))
+                    subject = args.get("subject", "Chimera LogMind Daily Report")
+                    
+                    if not to_email:
+                        conn.sendall(b"ERR missing recipient email\n")
+                        return
+                    
+                    from reporting import ReportGenerator, ReportDelivery
+                    generator = ReportGenerator(db_path)
+                    delivery = ReportDelivery()
+                    
+                    # Generate report
+                    report = generator.generate_daily_report(since_seconds)
+                    report_text = generator.format_report_as_text(report)
+                    report_html = generator.format_report_as_html(report)
+                    
+                    # Send email
+                    success = delivery.send_report_email(report_text, report_html, to_email, subject)
+                    if success:
+                        conn.sendall(f"OK report sent to {to_email}\n".encode())
+                    else:
+                        conn.sendall(b"ERR failed to send email\n".encode())
+                
+                elif report_action == "LIST":
+                    # Usage: REPORT LIST [limit=N]
+                    args = {}
+                    for tok in tokens[2:]:
+                        if "=" in tok:
+                            k, v = tok.split("=", 1)
+                            args[k] = v
+                    
+                    limit = int(args.get("limit", 10))
+                    
+                    from reporting import ReportDelivery
+                    delivery = ReportDelivery()
+                    
+                    # List saved reports
+                    import os
+                    from pathlib import Path
+                    
+                    reports_dir = Path("/var/lib/chimera/reports")
+                    if reports_dir.exists():
+                        report_files = []
+                        for file in reports_dir.glob("report_*.txt"):
+                            report_files.append({
+                                "filename": file.name,
+                                "size": file.stat().st_size,
+                                "modified": dt.datetime.fromtimestamp(file.stat().st_mtime).isoformat()
+                            })
+                        
+                        # Sort by modification time (newest first)
+                        report_files.sort(key=lambda x: x["modified"], reverse=True)
+                        report_files = report_files[:limit]
+                        
+                        for report_file in report_files:
+                            conn.sendall((json.dumps(report_file) + "\n").encode())
+                    else:
+                        conn.sendall(b"ERR reports directory not found\n".encode())
+                
+                else:
+                    conn.sendall(b"ERR unknown report action\n".encode())
+=======
             # Usage: CHAT message="text"
             try:
                 if len(tokens) < 2:
@@ -581,6 +764,90 @@ def handle_client(conn: socket.socket, db_path: Optional[str]) -> None:
             except Exception as exc:
                 conn.sendall(f"ERR {exc}\n".encode())
         
+        elif command.startswith("AUDIT"):
+            # Usage: AUDIT FULL|TOOL|HISTORY|DETAILS [args...]
+            try:
+                if len(tokens) < 2:
+                    conn.sendall(b"ERR missing audit action\n")
+                    return
+                
+                audit_action = tokens[1].upper()
+                
+                from security_audit import SecurityAuditor
+                auditor = SecurityAuditor(db_path)
+                
+                if audit_action == "FULL":
+                    # Run full security audit
+                    results = auditor.run_full_audit()
+                    conn.sendall((json.dumps(results, indent=2) + "\n").encode())
+                
+                elif audit_action == "TOOL":
+                    # Usage: AUDIT TOOL [tool=TOOL_NAME]
+                    args = {}
+                    for tok in tokens[2:]:
+                        if "=" in tok:
+                            k, v = tok.split("=", 1)
+                            args[k] = v
+                    
+                    tool = args.get("tool")
+                    if not tool:
+                        conn.sendall(b"ERR missing tool name\n")
+                        return
+                    
+                    # Run specific tool
+                    tool_functions = {
+                        "auditd": auditor.run_auditd_check,
+                        "aide": auditor.run_aide_check,
+                        "rkhunter": auditor.run_rkhunter_check,
+                        "chkrootkit": auditor.run_chkrootkit_check,
+                        "clamav": auditor.run_clamav_check,
+                        "openscap": auditor.run_openscap_check,
+                        "lynis": auditor.run_lynis_check
+                    }
+                    
+                    if tool in tool_functions:
+                        result = tool_functions[tool]()
+                        conn.sendall((json.dumps(result, indent=2) + "\n").encode())
+                    else:
+                        conn.sendall(f"ERR unknown tool: {tool}\n".encode())
+                
+                elif audit_action == "HISTORY":
+                    # Usage: AUDIT HISTORY [tool=TOOL_NAME] [limit=N]
+                    args = {}
+                    for tok in tokens[2:]:
+                        if "=" in tok:
+                            k, v = tok.split("=", 1)
+                            args[k] = v
+                    
+                    tool = args.get("tool")
+                    limit = int(args.get("limit", 50))
+                    
+                    history = auditor.get_audit_history(tool, limit)
+                    for entry in history:
+                        conn.sendall((json.dumps(entry) + "\n").encode())
+                
+                elif audit_action == "DETAILS":
+                    # Usage: AUDIT DETAILS [id=ID]
+                    args = {}
+                    for tok in tokens[2:]:
+                        if "=" in tok:
+                            k, v = tok.split("=", 1)
+                            args[k] = v
+                    
+                    audit_id = int(args.get("id"))
+                    if not audit_id:
+                        conn.sendall(b"ERR missing audit ID\n")
+                        return
+                    
+                    details = auditor.get_audit_details(audit_id)
+                    if details:
+                        conn.sendall((json.dumps(details, indent=2) + "\n").encode())
+                    else:
+                        conn.sendall(b"ERR audit not found\n".encode())
+                
+                else:
+                    conn.sendall(b"ERR unknown audit action\n".encode())
+=======
         elif command.startswith("CHAT_HISTORY"):
             # Usage: CHAT_HISTORY
             try:
@@ -617,6 +884,7 @@ def handle_client(conn: socket.socket, db_path: Optional[str]) -> None:
                 
                 # Send stats as JSON
                 conn.sendall((json.dumps(stats) + "\n").encode())
+>>>>>>> origin/main
                     
             except Exception as exc:
                 conn.sendall(f"ERR {exc}\n".encode())
