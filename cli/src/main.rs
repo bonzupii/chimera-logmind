@@ -41,6 +41,42 @@ enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Semantic search logs
+    Search {
+        /// Search query
+        #[arg(long)]
+        query: String,
+        /// Number of results (default: 10)
+        #[arg(long, default_value_t = 10)]
+        n_results: i64,
+        /// Look back window in seconds
+        #[arg(long)]
+        since: Option<i64>,
+        /// Filter by source
+        #[arg(long)]
+        source: Option<String>,
+        /// Filter by unit
+        #[arg(long)]
+        unit: Option<String>,
+        /// Filter by severity
+        #[arg(long)]
+        severity: Option<String>,
+    },
+    /// Index logs for semantic search
+    Index {
+        /// Look back window in seconds (default: 86400)
+        #[arg(long, default_value_t = 86400)]
+        since: i64,
+        /// Limit number of logs to index
+        #[arg(long)]
+        limit: Option<i64>,
+    },
+    /// Detect anomalies in logs
+    Anomalies {
+        /// Look back window in seconds (default: 3600)
+        #[arg(long, default_value_t = 3600)]
+        since: i64,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -232,6 +268,35 @@ fn main() -> Result<()> {
                 println!("{}", response.trim_end());
             }
         },
+        Commands::Search { query, n_results, since, source, unit, severity } => {
+            let mut parts = vec![
+                "SEARCH".into(),
+                format!("query={}", urlencoding::encode(query)),
+                format!("n_results={}", n_results),
+            ];
+            if let Some(s) = since { parts.push(format!("since={}", s)); }
+            if let Some(s) = source { parts.push(format!("source={}", s)); }
+            if let Some(u) = unit { parts.push(format!("unit={}", u)); }
+            if let Some(s) = severity { parts.push(format!("severity={}", s)); }
+            let cmd = parts.join(" ");
+            let response = send_request(&cli.socket, &cmd)?;
+            print!("{}", response);
+        }
+        Commands::Index { since, limit } => {
+            let mut parts = vec![
+                "INDEX".into(),
+                format!("since={}", since),
+            ];
+            if let Some(l) = limit { parts.push(format!("limit={}", l)); }
+            let cmd = parts.join(" ");
+            let response = send_request(&cli.socket, &cmd)?;
+            println!("{}", response.trim_end());
+        }
+        Commands::Anomalies { since } => {
+            let cmd = format!("ANOMALIES since={}", since);
+            let response = send_request(&cli.socket, &cmd)?;
+            print!("{}", response);
+        }
     }
 
     Ok(())

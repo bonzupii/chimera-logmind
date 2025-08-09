@@ -1,0 +1,405 @@
+#!/usr/bin/env python3
+import json
+import hashlib
+import datetime as dt
+import subprocess
+import requests
+from typing import List, Dict, Any, Optional, Tuple
+import threading
+import time
+
+from .db import get_connection
+
+
+class OllamaEmbeddingClient:
+    """Client for Ollama embedding API"""
+    
+    def __init__(self, base_url: str = "http://localhost:11434", model: str = "nomic-embed-text"):
+        self.base_url = base_url.rstrip('/')
+        self.model = model
+        self.session = requests.Session()
+        self.session.timeout = 30
+    
+    def get_embedding(self, text: str) -> Optional[List[float]]:
+        """Get embedding for a text string"""
+        try:
+            response = self.session.post(
+                f"{self.base_url}/api/embeddings",
+                json={
+                    "model": self.model,
+                    "prompt": text
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("embedding")
+        except Exception as e:
+            print(f"Error getting embedding: {e}")
+            return None
+    
+    def get_embeddings_batch(self, texts: List[str], batch_size: int = 10) -> List[Optional[List[float]]]:
+        """Get embeddings for multiple texts in batches"""
+        embeddings = []
+        
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            batch_embeddings = []
+            
+            for text in batch:
+                embedding = self.get_embedding(text)
+                batch_embeddings.append(embedding)
+            
+            embeddings.extend(batch_embeddings)
+            time.sleep(0.1)  # Rate limiting
+        
+        return embeddings
+
+
+class ChromaDBClient:
+    """Client for ChromaDB vector database"""
+    
+    def __init__(self, persist_directory: str = "/var/lib/chimera/chromadb"):
+        self.persist_directory = persist_directory
+        self.collection_name = "log_embeddings"
+        self._client = None
+        self._collection = None
+        self._lock = threading.Lock()
+    
+    def _get_client(self):
+        """Get ChromaDB client (lazy initialization)"""
+        if self._client is None:
+            try:
+                import chromadb
+                from chromadb.config import Settings
+                
+                self._client = chromadb.PersistentClient(
+                    path=self.persist_directory,
+                    settings=Settings(
+                        anonymized_telemetry=False,
+                        allow_reset=True
+                    )
+                )
+            except ImportError:
+                raise RuntimeError("ChromaDB not installed. Install with: pip install chromadb")
+        
+        return self._client
+    
+    def _get_collection(self):
+        """Get or create the embeddings collection"""
+        if self._collection is None:
+            client = self._get_client()
+            
+            try:
+                self._collection = client.get_collection(self.collection_name)
+            except Exception:
+                # Collection doesn't exist, create it
+                self._collection = client.create_collection(
+                    name=self.collection_name,
+                    metadata={"description": "Log message embeddings for semantic search"}
+                )
+        
+        return self._collection
+    
+    def add_embeddings(self, ids: List[str], embeddings: List[List[float]], 
+                      metadatas: List[Dict[str, Any]], documents: List[str]) -> None:
+        """Add embeddings to the collection"""
+        with self._lock:
+            collection = self._get_collection()
+            collection.add(
+                ids=ids,
+                embeddings=embeddings,
+                metadatas=metadatas,
+                documents=documents
+            )
+    
+    def search(self, query_embedding: List[float], n_results: int = 10, 
+               where: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Search for similar embeddings"""
+        with self._lock:
+            collection = self._get_collection()
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                where=where
+            )
+            return results
+    
+    def delete_embeddings(self, ids: List[str]) -> None:
+        """Delete embeddings by IDs"""
+        with self._lock:
+            collection = self._get_collection()
+            collection.delete(ids=ids)
+
+
+class SemanticSearchEngine:
+    """Semantic search engine for log messages"""
+    
+    def __init__(self, db_path: Optional[str] = None, 
+                 ollama_url: str = "http://localhost:11434",
+                 ollama_model: str = "nomic-embed-text",
+                 chroma_persist_dir: str = "/var/lib/chimera/chromadb"):
+        self.db_path = db_path
+        self.embedding_client = OllamaEmbeddingClient(ollama_url, ollama_model)
+        self.chroma_client = ChromaDBClient(chroma_persist_dir)
+        self._lock = threading.Lock()
+    
+    def index_logs(self, log_ids: Optional[List[int]] = None, 
+                   since_seconds: int = 86400) -> Tuple[int, int]:
+        """Index logs for semantic search"""
+        conn = get_connection(self.db_path)
+        try:
+            # Get logs to index
+            if log_ids:
+                placeholders = ','.join(['?' for _ in log_ids])
+                sql = f"""
+                    SELECT id, ts, hostname, source, unit, severity, message 
+                    FROM logs 
+                    WHERE id IN ({placeholders}) AND id NOT IN (
+                        SELECT log_id FROM log_embeddings
+                    )
+                """
+                params = log_ids
+            else:
+                since_ts = dt.datetime.utcnow() - dt.timedelta(seconds=since_seconds)
+                sql = """
+                    SELECT id, ts, hostname, source, unit, severity, message 
+                    FROM logs 
+                    WHERE ts >= ? AND id NOT IN (
+                        SELECT log_id FROM log_embeddings
+                    )
+                    ORDER BY ts DESC
+                    LIMIT 1000
+                """
+                params = [since_ts]
+            
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            logs = cur.fetchall()
+            
+            if not logs:
+                return (0, 0)
+            
+            # Prepare data for embedding
+            texts = []
+            metadatas = []
+            documents = []
+            ids = []
+            
+            for log_id, ts, hostname, source, unit, severity, message in logs:
+                # Create searchable text
+                search_text = f"{unit}: {message}"
+                if hostname:
+                    search_text = f"[{hostname}] {search_text}"
+                
+                texts.append(search_text)
+                metadatas.append({
+                    "log_id": log_id,
+                    "ts": ts.isoformat() if ts else None,
+                    "hostname": hostname,
+                    "source": source,
+                    "unit": unit,
+                    "severity": severity,
+                })
+                documents.append(message or "")
+                ids.append(f"log_{log_id}")
+            
+            # Get embeddings
+            embeddings = self.embedding_client.get_embeddings_batch(texts)
+            
+            # Filter out failed embeddings
+            valid_data = []
+            for i, embedding in enumerate(embeddings):
+                if embedding is not None:
+                    valid_data.append((ids[i], embedding, metadatas[i], documents[i]))
+            
+            if not valid_data:
+                return (0, 0)
+            
+            # Add to ChromaDB
+            ids, embeddings, metadatas, documents = zip(*valid_data)
+            self.chroma_client.add_embeddings(list(ids), list(embeddings), list(metadatas), list(documents))
+            
+            # Record in database
+            for log_id, _, _, _ in valid_data:
+                conn.execute(
+                    "INSERT OR IGNORE INTO log_embeddings (log_id, indexed_at) VALUES (?, CURRENT_TIMESTAMP)",
+                    [int(log_id.split('_')[1])]
+                )
+            
+            return (len(valid_data), len(logs))
+            
+        finally:
+            conn.close()
+    
+    def search_logs(self, query: str, n_results: int = 10, 
+                   since_seconds: Optional[int] = None,
+                   source: Optional[str] = None,
+                   unit: Optional[str] = None,
+                   severity: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Search logs semantically"""
+        # Get query embedding
+        query_embedding = self.embedding_client.get_embedding(query)
+        if not query_embedding:
+            return []
+        
+        # Build where clause for ChromaDB
+        where_clause = {}
+        if since_seconds:
+            since_ts = dt.datetime.utcnow() - dt.timedelta(seconds=since_seconds)
+            where_clause["ts"] = {"$gte": since_ts.isoformat()}
+        if source:
+            where_clause["source"] = source
+        if unit:
+            where_clause["unit"] = unit
+        if severity:
+            where_clause["severity"] = severity
+        
+        # Search ChromaDB
+        results = self.chroma_client.search(query_embedding, n_results, where_clause)
+        
+        # Get full log details from database
+        if not results.get("ids") or not results["ids"][0]:
+            return []
+        
+        log_ids = [int(metadata["log_id"]) for metadata in results["metadatas"][0]]
+        
+        conn = get_connection(self.db_path)
+        try:
+            placeholders = ','.join(['?' for _ in log_ids])
+            sql = f"""
+                SELECT ts, hostname, source, unit, severity, pid, message 
+                FROM logs 
+                WHERE id IN ({placeholders})
+                ORDER BY ts DESC
+            """
+            cur = conn.cursor()
+            cur.execute(sql, log_ids)
+            logs = cur.fetchall()
+            
+            # Combine with search results
+            search_results = []
+            for i, (ts, hostname, src, unit, sev, pid, message) in enumerate(logs):
+                if i < len(results["distances"][0]):
+                    search_results.append({
+                        "ts": ts.isoformat() if ts else None,
+                        "hostname": hostname,
+                        "source": src,
+                        "unit": unit,
+                        "severity": sev,
+                        "pid": pid,
+                        "message": message,
+                        "similarity": 1.0 - results["distances"][0][i],  # Convert distance to similarity
+                    })
+            
+            return search_results
+            
+        finally:
+            conn.close()
+    
+    def cleanup_old_embeddings(self, days: int = 30) -> int:
+        """Clean up old embeddings"""
+        cutoff_date = dt.datetime.utcnow() - dt.timedelta(days=days)
+        
+        conn = get_connection(self.db_path)
+        try:
+            # Get old embedding IDs
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT log_id FROM log_embeddings WHERE indexed_at < ?",
+                [cutoff_date]
+            )
+            old_ids = [f"log_{row[0]}" for row in cur.fetchall()]
+            
+            if old_ids:
+                # Delete from ChromaDB
+                self.chroma_client.delete_embeddings(old_ids)
+                
+                # Delete from database
+                conn.execute(
+                    "DELETE FROM log_embeddings WHERE indexed_at < ?",
+                    [cutoff_date]
+                )
+            
+            return len(old_ids)
+            
+        finally:
+            conn.close()
+
+
+class AnomalyDetector:
+    """Simple anomaly detection for log patterns"""
+    
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = db_path
+    
+    def detect_anomalies(self, since_seconds: int = 3600) -> List[Dict[str, Any]]:
+        """Detect anomalies in recent logs"""
+        conn = get_connection(self.db_path)
+        try:
+            since_ts = dt.datetime.utcnow() - dt.timedelta(seconds=since_seconds)
+            
+            anomalies = []
+            
+            # 1. Detect unusual error spikes
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT unit, COUNT(*) as error_count
+                FROM logs 
+                WHERE ts >= ? AND severity IN ('err', 'crit', 'emerg')
+                GROUP BY unit
+                HAVING error_count > 10
+                ORDER BY error_count DESC
+            """, [since_ts])
+            
+            for unit, error_count in cur.fetchall():
+                anomalies.append({
+                    "type": "error_spike",
+                    "unit": unit,
+                    "count": error_count,
+                    "severity": "high",
+                    "description": f"High error rate in {unit}: {error_count} errors"
+                })
+            
+            # 2. Detect unusual log volume
+            cur.execute("""
+                SELECT source, COUNT(*) as log_count
+                FROM logs 
+                WHERE ts >= ? 
+                GROUP BY source
+                HAVING log_count > 1000
+                ORDER BY log_count DESC
+            """, [since_ts])
+            
+            for source, log_count in cur.fetchall():
+                anomalies.append({
+                    "type": "high_volume",
+                    "source": source,
+                    "count": log_count,
+                    "severity": "medium",
+                    "description": f"High log volume from {source}: {log_count} logs"
+                })
+            
+            # 3. Detect missing expected logs
+            cur.execute("""
+                SELECT unit, MAX(ts) as last_seen
+                FROM logs 
+                WHERE unit IN ('systemd', 'sshd', 'cron') AND ts >= ?
+                GROUP BY unit
+            """, [since_ts])
+            
+            expected_units = {'systemd', 'sshd', 'cron'}
+            seen_units = {row[0] for row in cur.fetchall()}
+            missing_units = expected_units - seen_units
+            
+            for unit in missing_units:
+                anomalies.append({
+                    "type": "missing_logs",
+                    "unit": unit,
+                    "severity": "medium",
+                    "description": f"Missing expected logs from {unit}"
+                })
+            
+            return anomalies
+            
+        finally:
+            conn.close()

@@ -14,12 +14,14 @@ try:
     from .ingest import ingest_journal_into_duckdb  # type: ignore
     from .config import ChimeraConfig  # type: ignore
     from .ingest_framework import IngestionFramework  # type: ignore
+    from .embeddings import SemanticSearchEngine, AnomalyDetector  # type: ignore
 except Exception:
     # Fallback to relative imports when executed directly
     from db import get_connection, initialize_schema  # type: ignore
     from ingest import ingest_journal_into_duckdb  # type: ignore
     from config import ChimeraConfig  # type: ignore
     from ingest_framework import IngestionFramework  # type: ignore
+    from embeddings import SemanticSearchEngine, AnomalyDetector  # type: ignore
 
 # Load configuration
 config = ChimeraConfig.load()
@@ -372,6 +374,97 @@ def handle_client(conn: socket.socket, db_path: Optional[str]) -> None:
                 
             except Exception as exc:
                 conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("SEARCH"):
+            # Usage: SEARCH query="text" [n_results=N] [since=SECONDS] [source=SOURCE] [unit=UNIT] [severity=SEVERITY]
+            try:
+                if len(tokens) < 2:
+                    conn.sendall(b"ERR search-query-required\n")
+                    return
+                
+                # Parse arguments
+                args = {}
+                query = None
+                for tok in tokens[1:]:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        if k == "query":
+                            try:
+                                from urllib.parse import unquote
+                                query = unquote(v)
+                            except Exception:
+                                query = v
+                        else:
+                            args[k.lower()] = v
+                
+                if not query:
+                    conn.sendall(b"ERR search-query-required\n")
+                    return
+                
+                n_results = int(args.get("n_results", 10))
+                since_seconds = int(args.get("since", 86400)) if args.get("since") else None
+                source = args.get("source")
+                unit = args.get("unit")
+                severity = args.get("severity")
+                
+                search_engine = SemanticSearchEngine(db_path)
+                results = search_engine.search_logs(
+                    query=query,
+                    n_results=n_results,
+                    since_seconds=since_seconds,
+                    source=source,
+                    unit=unit,
+                    severity=severity
+                )
+                
+                # Stream results as JSONL
+                for result in results:
+                    conn.sendall((json.dumps(result) + "\n").encode())
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("INDEX"):
+            # Usage: INDEX [since=SECONDS] [limit=N]
+            try:
+                args = {}
+                for tok in tokens[1:]:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        args[k.lower()] = v
+                
+                since_seconds = int(args.get("since", 86400))
+                limit = int(args.get("limit", 1000)) if args.get("limit") else None
+                
+                search_engine = SemanticSearchEngine(db_path)
+                indexed, total = search_engine.index_logs(since_seconds=since_seconds)
+                
+                conn.sendall(f"OK indexed={indexed} total={total}\n".encode())
+                
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("ANOMALIES"):
+            # Usage: ANOMALIES [since=SECONDS]
+            try:
+                args = {}
+                for tok in tokens[1:]:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        args[k.lower()] = v
+                
+                since_seconds = int(args.get("since", 3600))
+                
+                detector = AnomalyDetector(db_path)
+                anomalies = detector.detect_anomalies(since_seconds=since_seconds)
+                
+                # Stream anomalies as JSONL
+                for anomaly in anomalies:
+                    conn.sendall((json.dumps(anomaly) + "\n").encode())
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
         else:
             conn.sendall(b"ERR unknown command\n")
     finally:

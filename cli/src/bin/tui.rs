@@ -73,8 +73,8 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut tab_index = 0usize; // 0: Logs, 1: Actions
-    let titles = vec!["Logs", "Actions"]; 
+    let mut tab_index = 0usize; // 0: Logs, 1: Search, 2: Actions
+    let titles = vec!["Logs", "Search", "Actions"]; 
     let mut logs: Vec<LogItem> = Vec::new();
     let mut status = String::new();
     let mut selected = 0usize;
@@ -117,6 +117,11 @@ fn main() -> Result<()> {
                     let list = List::new(items)
                         .block(Block::default().borders(Borders::ALL).title("Recent Logs"));
                     f.render_widget(list, chunks[1]);
+                }
+                1 => {
+                    let help = Paragraph::new("Semantic Search: Use CLI 'chimera search --query \"text\"' to search logs semantically")
+                        .block(Block::default().borders(Borders::ALL).title("Semantic Search"));
+                    f.render_widget(help, chunks[1]);
                 }
                 _ => {
                     let help = Paragraph::new("Keys: i=ingest 5m, I=ingest 1h, r=refresh, q=quit, ←/→ tabs, ↑/↓ select")

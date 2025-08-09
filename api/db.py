@@ -58,6 +58,15 @@ def initialize_schema(conn) -> None:
         );
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS log_embeddings (
+            log_id INTEGER PRIMARY KEY,
+            indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (log_id) REFERENCES logs(id) ON DELETE CASCADE
+        );
+        """
+    )
     # Backfill columns for existing installations (best-effort)
     try:
         conn.execute("ALTER TABLE logs ADD COLUMN fingerprint TEXT")
