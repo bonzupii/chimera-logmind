@@ -47,13 +47,14 @@ def initialize_schema(conn) -> None:
     def ensure_column_exists(table_name: str, column_name: str, column_type: str) -> None:
         """Add a column only if it does not already exist (avoids startup warnings).
 
-        Uses pragma_table_info which is stable in DuckDB.
+        Uses pragma_table_info('table') to check columns.
         """
         try:
+            # Use a literal for table name (we only call with trusted names)
             exists = (
                 conn.execute(
-                    "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
-                    [table_name, column_name],
+                    f"SELECT COUNT(*) FROM pragma_table_info('{table_name}') WHERE name = ?",
+                    [column_name],
                 ).fetchone()[0]
                 > 0
             )
