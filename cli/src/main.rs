@@ -77,6 +77,32 @@ enum Commands {
         #[arg(long, default_value_t = 3600)]
         since: i64,
     },
+    /// Get system metrics
+    Metrics {
+        /// Metric type (cpu, memory, disk, network, service, uptime)
+        #[arg(long)]
+        metric_type: Option<String>,
+        /// Look back window in seconds (default: 3600)
+        #[arg(long, default_value_t = 3600)]
+        since: i64,
+        /// Limit number of results
+        #[arg(long, default_value_t = 1000)]
+        limit: i64,
+    },
+    /// Collect current system metrics
+    CollectMetrics,
+    /// Get system alerts
+    Alerts {
+        /// Look back window in seconds (default: 86400)
+        #[arg(long, default_value_t = 86400)]
+        since: i64,
+        /// Filter by severity (warning, critical)
+        #[arg(long)]
+        severity: Option<String>,
+        /// Filter by acknowledgment status
+        #[arg(long)]
+        acknowledged: Option<bool>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -294,6 +320,32 @@ fn main() -> Result<()> {
         }
         Commands::Anomalies { since } => {
             let cmd = format!("ANOMALIES since={}", since);
+            let response = send_request(&cli.socket, &cmd)?;
+            print!("{}", response);
+        }
+        Commands::Metrics { metric_type, since, limit } => {
+            let mut parts = vec![
+                "METRICS".into(),
+                format!("since={}", since),
+                format!("limit={}", limit),
+            ];
+            if let Some(mt) = metric_type { parts.push(format!("type={}", mt)); }
+            let cmd = parts.join(" ");
+            let response = send_request(&cli.socket, &cmd)?;
+            print!("{}", response);
+        }
+        Commands::CollectMetrics => {
+            let response = send_request(&cli.socket, "COLLECT_METRICS")?;
+            println!("{}", response.trim_end());
+        }
+        Commands::Alerts { since, severity, acknowledged } => {
+            let mut parts = vec![
+                "ALERTS".into(),
+                format!("since={}", since),
+            ];
+            if let Some(s) = severity { parts.push(format!("severity={}", s)); }
+            if let Some(a) = acknowledged { parts.push(format!("acknowledged={}", a)); }
+            let cmd = parts.join(" ");
             let response = send_request(&cli.socket, &cmd)?;
             print!("{}", response);
         }

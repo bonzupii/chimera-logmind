@@ -15,6 +15,7 @@ try:
     from .config import ChimeraConfig  # type: ignore
     from .ingest_framework import IngestionFramework  # type: ignore
     from .embeddings import SemanticSearchEngine, AnomalyDetector  # type: ignore
+    from .system_health import SystemHealthMonitor  # type: ignore
 except Exception:
     # Fallback to relative imports when executed directly
     from db import get_connection, initialize_schema  # type: ignore
@@ -22,6 +23,7 @@ except Exception:
     from config import ChimeraConfig  # type: ignore
     from ingest_framework import IngestionFramework  # type: ignore
     from embeddings import SemanticSearchEngine, AnomalyDetector  # type: ignore
+    from system_health import SystemHealthMonitor  # type: ignore
 
 # Load configuration
 config = ChimeraConfig.load()
@@ -461,6 +463,75 @@ def handle_client(conn: socket.socket, db_path: Optional[str]) -> None:
                 # Stream anomalies as JSONL
                 for anomaly in anomalies:
                     conn.sendall((json.dumps(anomaly) + "\n").encode())
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("METRICS"):
+            # Usage: METRICS [type=TYPE] [since=SECONDS] [limit=N]
+            try:
+                args = {}
+                for tok in tokens[1:]:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        args[k.lower()] = v
+                
+                metric_type = args.get("type")
+                since_seconds = int(args.get("since", 3600))
+                limit = int(args.get("limit", 1000))
+                
+                monitor = SystemHealthMonitor(db_path)
+                metrics = monitor.get_metrics(
+                    metric_type=metric_type,
+                    since_seconds=since_seconds,
+                    limit=limit
+                )
+                
+                # Stream metrics as JSONL
+                for metric in metrics:
+                    conn.sendall((json.dumps(metric) + "\n").encode())
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("COLLECT_METRICS"):
+            # Usage: COLLECT_METRICS
+            try:
+                from system_health import SystemMetricsCollector
+                collector = SystemMetricsCollector(db_path)
+                metrics = collector.collect_all_metrics()
+                stored = collector.store_metrics(metrics)
+                conn.sendall(f"OK collected={stored}\n".encode())
+                
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("ALERTS"):
+            # Usage: ALERTS [since=SECONDS] [severity=SEVERITY] [acknowledged=BOOL]
+            try:
+                args = {}
+                for tok in tokens[1:]:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        if k == "acknowledged":
+                            args[k] = v.lower() == "true"
+                        else:
+                            args[k] = v
+                
+                since_seconds = int(args.get("since", 86400))
+                severity = args.get("severity")
+                acknowledged = args.get("acknowledged")
+                
+                monitor = SystemHealthMonitor(db_path)
+                alerts = monitor.get_alerts(
+                    since_seconds=since_seconds,
+                    severity=severity,
+                    acknowledged=acknowledged
+                )
+                
+                # Stream alerts as JSONL
+                for alert in alerts:
+                    conn.sendall((json.dumps(alert) + "\n").encode())
                     
             except Exception as exc:
                 conn.sendall(f"ERR {exc}\n".encode())
