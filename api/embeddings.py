@@ -546,3 +546,84 @@ Answer:"""
                 break
             except Exception as e:
                 print(f"Error: {e}")
+    
+    def get_chat_history(self) -> List[Dict[str, Any]]:
+        """Get chat history from database"""
+        conn = get_connection(self.db_path)
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS chat_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    session_id TEXT
+                )
+            """)
+            
+            cur = conn.execute("""
+                SELECT timestamp, role, content, session_id
+                FROM chat_history 
+                ORDER BY timestamp DESC
+                LIMIT 50
+            """)
+            
+            history = []
+            for row in cur.fetchall():
+                history.append({
+                    "timestamp": row[0],
+                    "role": row[1],
+                    "content": row[2],
+                    "session_id": row[3]
+                })
+            
+            return history
+            
+        finally:
+            conn.close()
+    
+    def clear_chat_history(self) -> None:
+        """Clear chat history from database"""
+        conn = get_connection(self.db_path)
+        try:
+            conn.execute("DELETE FROM chat_history")
+        finally:
+            conn.close()
+    
+    def get_chat_stats(self) -> Dict[str, Any]:
+        """Get chat statistics"""
+        conn = get_connection(self.db_path)
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS chat_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    session_id TEXT
+                )
+            """)
+            
+            # Get total messages
+            cur = conn.execute("SELECT COUNT(*) FROM chat_history")
+            total_messages = cur.fetchone()[0]
+            
+            # Get messages by role
+            cur = conn.execute("SELECT role, COUNT(*) FROM chat_history GROUP BY role")
+            messages_by_role = dict(cur.fetchall())
+            
+            # Get recent activity
+            cur = conn.execute("""
+                SELECT COUNT(*) FROM chat_history 
+                WHERE timestamp >= datetime('now', '-1 hour')
+            """)
+            recent_messages = cur.fetchone()[0]
+            
+            return {
+                "total_messages": total_messages,
+                "messages_by_role": messages_by_role,
+                "recent_messages_1h": recent_messages
+            }
+            
+        finally:
+            conn.close()

@@ -108,6 +108,18 @@ enum Commands {
         #[command(subcommand)]
         mode: ChatMode,
     },
+    /// Simple AI chat (legacy)
+    ChatMessage {
+        /// Chat message
+        #[arg(long)]
+        message: String,
+    },
+    /// Get chat history
+    ChatHistory,
+    /// Clear chat history
+    ChatClear,
+    /// Get chat system stats
+    ChatStats,
     /// Generate and manage reports
     Report {
         #[command(subcommand)]
@@ -204,6 +216,7 @@ enum AuditAction {
         #[arg(long)]
         id: i64,
     },
+}
 }
 
 #[derive(Subcommand, Debug)]
@@ -473,6 +486,23 @@ fn main() -> Result<()> {
                 print!("{}", response);
             }
         }
+        Commands::ChatMessage { message } => {
+            let cmd = format!("CHAT message={}", urlencoding::encode(&message));
+            let response = send_request(&cli.socket, &cmd)?;
+            print!("{}", response);
+        }
+        Commands::ChatHistory => {
+            let response = send_request(&cli.socket, "CHAT_HISTORY")?;
+            print!("{}", response);
+        }
+        Commands::ChatClear => {
+            let response = send_request(&cli.socket, "CHAT_CLEAR")?;
+            println!("{}", response.trim_end());
+        }
+        Commands::ChatStats => {
+            let response = send_request(&cli.socket, "CHAT_STATS")?;
+            print!("{}", response);
+        }
         Commands::Report { action } => match action {
             ReportAction::Generate { since, format, output } => {
                 let mut parts = vec![
@@ -534,6 +564,7 @@ fn main() -> Result<()> {
                 let response = send_request(&cli.socket, &cmd)?;
                 print!("{}", response);
             }
+        }
         }
     }
 
