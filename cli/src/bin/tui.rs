@@ -64,6 +64,32 @@ fn trigger_ingest(socket: &str, seconds: i64, limit: Option<i64>) -> Result<Stri
     uds_request(socket, &cmd)
 }
 
+fn send_chat_message(socket: &str, query: &str) -> Result<String> {
+    let cmd = format!("CHAT query={}", urlencoding::encode(query));
+    uds_request(socket, &cmd)
+}
+
+fn get_chat_history(socket: &str, limit: i64) -> Result<Vec<String>> {
+    let cmd = format!("CHAT_HISTORY limit={}", limit);
+    let resp = uds_request(socket, &cmd)?;
+    let mut history = Vec::new();
+    for line in resp.lines() {
+        if line.starts_with("ERR ") {
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+            let role = json.get("role").and_then(|x| x.as_str()).unwrap_or("unknown");
+            let content = json.get("content").and_then(|x| x.as_str()).unwrap_or("");
+            let timestamp = json.get("timestamp").and_then(|x| x.as_str()).unwrap_or("");
+            history.push(format!("[{}] {}: {}", timestamp, role, content));
+        }
+    }
+    Ok(history)
+}
+
 fn main() -> Result<()> {
     let socket = std::env::var("CHIMERA_API_SOCKET").unwrap_or_else(|_| "/run/chimera/api.sock".to_string());
 
@@ -73,11 +99,14 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut tab_index = 0usize; // 0: Logs, 1: Search, 2: Health, 3: Actions
-    let titles = vec!["Logs", "Search", "Health", "Actions"]; 
+    let mut tab_index = 0usize; // 0: Logs, 1: Search, 2: Health, 3: Chat, 4: Actions
+    let titles = vec!["Logs", "Search", "Health", "Chat", "Actions"]; 
     let mut logs: Vec<LogItem> = Vec::new();
     let mut status = String::new();
     let mut selected = 0usize;
+    let mut chat_history: Vec<String> = Vec::new();
+    let mut chat_input = String::new();
+    let mut chat_mode = false;
 
     'mainloop: loop {
         if let Ok(new_logs) = fetch_logs(&socket, 3600, 200) {
@@ -128,8 +157,32 @@ fn main() -> Result<()> {
                         .block(Block::default().borders(Borders::ALL).title("System Health"));
                     f.render_widget(help, chunks[1]);
                 }
+                3 => {
+                    // Chat tab
+                    let chat_chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Min(1),
+                            Constraint::Length(3),
+                        ])
+                        .split(chunks[1]);
+                    
+                    // Chat history
+                    let chat_items: Vec<ListItem> = chat_history.iter().map(|msg| {
+                        ListItem::new(msg.clone())
+                    }).collect();
+                    let chat_list = List::new(chat_items)
+                        .block(Block::default().borders(Borders::ALL).title("Chat History"));
+                    f.render_widget(chat_list, chat_chunks[0]);
+                    
+                    // Chat input
+                    let input_text = if chat_mode { format!("> {}", chat_input) } else { "Press 'c' to start chat, 'Enter' to send".to_string() };
+                    let input = Paragraph::new(input_text)
+                        .block(Block::default().borders(Borders::ALL).title("Chat Input"));
+                    f.render_widget(input, chat_chunks[1]);
+                }
                 _ => {
-                    let help = Paragraph::new("Keys: i=ingest 5m, I=ingest 1h, r=refresh, q=quit, ←/→ tabs, ↑/↓ select")
+                    let help = Paragraph::new("Keys: i=ingest 5m, I=ingest 1h, r=refresh, q=quit, ←/→ tabs, ↑/↓ select, c=chat")
                         .block(Block::default().borders(Borders::ALL).title("Actions"));
                     f.render_widget(help, chunks[1]);
                 }
@@ -161,8 +214,54 @@ fn main() -> Result<()> {
                             Err(e) => status = format!("ERR {}", e),
                         }
                     },
+                    KeyCode::Char('c') => {
+                        if tab_index == 3 { // Chat tab
+                            chat_mode = !chat_mode;
+                            if !chat_mode {
+                                chat_input.clear();
+                            }
+                        }
+                    },
+                    KeyCode::Enter => {
+                        if tab_index == 3 && chat_mode && !chat_input.is_empty() {
+                            // Send chat message
+                            match send_chat_message(&socket, &chat_input) {
+                                Ok(resp) => {
+                                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&resp) {
+                                        if let Some(response) = json.get("response").and_then(|x| x.as_str()) {
+                                            chat_history.push(format!("User: {}", chat_input));
+                                            chat_history.push(format!("Assistant: {}", response));
+                                            status = "Chat message sent successfully".to_string();
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    status = format!("Chat error: {}", e);
+                                }
+                            }
+                            chat_input.clear();
+                            chat_mode = false;
+                        }
+                    },
+                    KeyCode::Char(ch) => {
+                        if tab_index == 3 && chat_mode {
+                            chat_input.push(ch);
+                        }
+                    },
+                    KeyCode::Backspace => {
+                        if tab_index == 3 && chat_mode {
+                            chat_input.pop();
+                        }
+                    },
                     _ => {}
                 }
+            }
+        }
+        
+        // Load chat history when on chat tab
+        if tab_index == 3 && chat_history.is_empty() {
+            if let Ok(history) = get_chat_history(&socket, 10) {
+                chat_history = history;
             }
         }
     }

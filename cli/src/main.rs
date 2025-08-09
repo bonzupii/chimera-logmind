@@ -3,7 +3,7 @@ use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, CommandFactory};
 
 const DEFAULT_SOCKET_PATH: &str = "/run/chimera/api.sock";
 
@@ -35,6 +35,11 @@ enum Commands {
     Query {
         #[command(subcommand)]
         target: QueryTarget,
+    },
+    /// Export logs in various formats
+    Export {
+        #[command(subcommand)]
+        target: ExportTarget,
     },
     /// Manage configuration
     Config {
@@ -77,6 +82,15 @@ enum Commands {
         #[arg(long, default_value_t = 3600)]
         since: i64,
     },
+    /// Trigger anomaly scan and view results
+    AnomalyScan {
+        /// Look back window in seconds (default: 3600)
+        #[arg(long, default_value_t = 3600)]
+        since: i64,
+        /// Output format (json, table, summary)
+        #[arg(long, default_value = "summary")]
+        format: String,
+    },
     /// Get system metrics
     Metrics {
         /// Metric type (cpu, memory, disk, network, service, uptime)
@@ -102,6 +116,42 @@ enum Commands {
         /// Filter by acknowledgment status
         #[arg(long)]
         acknowledged: Option<bool>,
+    },
+    /// Chat with AI assistant using RAG
+    Chat {
+        /// Chat query
+        #[arg(long)]
+        query: String,
+        /// Ollama model to use (default: llama3.2:3b)
+        #[arg(long, default_value = "llama3.2:3b")]
+        model: String,
+        /// Clear conversation history before this query
+        #[arg(long, default_value_t = false)]
+        clear_history: bool,
+    },
+    /// Get chat conversation history
+    ChatHistory {
+        /// Number of messages to retrieve (default: 10)
+        #[arg(long, default_value_t = 10)]
+        limit: i64,
+    },
+    /// Clear chat conversation history
+    ChatClear,
+    /// Check Ollama health and status
+    OllamaHealth,
+    /// List available Ollama models
+    OllamaModels,
+    /// Generate shell completion script
+    Completions {
+        /// Shell to generate completion for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+    /// Show detailed help and examples
+    Help {
+        /// Command to show help for
+        #[arg(long)]
+        command: Option<String>,
     },
 }
 
@@ -148,6 +198,64 @@ enum QueryTarget {
         /// Order by timestamp asc|desc (default: desc)
         #[arg(long, default_value = "desc")]
         order: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ExportTarget {
+    /// Export logs to CSV format
+    Csv {
+        /// Look back window in seconds (default: 3600)
+        #[arg(long, default_value_t = 3600)]
+        since: i64,
+        /// Minimum severity (emerg, alert, crit, err, warning, notice, info, debug)
+        #[arg(long)]
+        min_severity: Option<String>,
+        /// Filter by source (e.g., journald)
+        #[arg(long)]
+        source: Option<String>,
+        /// Filter by systemd unit or identifier
+        #[arg(long)]
+        unit: Option<String>,
+        /// Filter by hostname
+        #[arg(long)]
+        hostname: Option<String>,
+        /// Substring search in message
+        #[arg(long)]
+        contains: Option<String>,
+        /// Max rows (default: 1000)
+        #[arg(long, default_value_t = 1000)]
+        limit: i64,
+        /// Output file path (default: stdout)
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Export logs to JSON format
+    Json {
+        /// Look back window in seconds (default: 3600)
+        #[arg(long, default_value_t = 3600)]
+        since: i64,
+        /// Minimum severity (emerg, alert, crit, err, warning, notice, info, debug)
+        #[arg(long)]
+        min_severity: Option<String>,
+        /// Filter by source (e.g., journald)
+        #[arg(long)]
+        source: Option<String>,
+        /// Filter by systemd unit or identifier
+        #[arg(long)]
+        unit: Option<String>,
+        /// Filter by hostname
+        #[arg(long)]
+        hostname: Option<String>,
+        /// Substring search in message
+        #[arg(long)]
+        contains: Option<String>,
+        /// Max rows (default: 1000)
+        #[arg(long, default_value_t = 1000)]
+        limit: i64,
+        /// Output file path (default: stdout)
+        #[arg(long)]
+        output: Option<String>,
     },
 }
 
@@ -250,6 +358,105 @@ fn main() -> Result<()> {
                 print!("{}", response);
             }
         },
+        Commands::Export { target } => match target {
+            ExportTarget::Csv {
+                since,
+                min_severity,
+                source,
+                unit,
+                hostname,
+                contains,
+                limit,
+                output,
+            } => {
+                let mut parts: Vec<String> = vec!["QUERY_LOGS".into(), format!("since={}", since)];
+                if let Some(v) = min_severity { parts.push(format!("min_severity={}", v)); }
+                if let Some(v) = source { parts.push(format!("source={}", v)); }
+                if let Some(v) = unit { parts.push(format!("unit={}", v)); }
+                if let Some(v) = hostname { parts.push(format!("hostname={}", v)); }
+                if let Some(v) = contains {
+                    let enc = urlencoding::encode(&v);
+                    parts.push(format!("contains={}", enc));
+                }
+                parts.push(format!("limit={}", limit));
+                parts.push("order=asc".into());
+                let cmd = parts.join(" ");
+                let response = send_request(&cli.socket, &cmd)?;
+                
+                // Convert JSONL to CSV
+                let mut csv_output = String::new();
+                csv_output.push_str("timestamp,hostname,source,unit,severity,pid,message\n");
+                
+                for line in response.lines() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                        let ts = json["ts"].as_str().unwrap_or("");
+                        let host = json["hostname"].as_str().unwrap_or("");
+                        let src = json["source"].as_str().unwrap_or("");
+                        let u = json["unit"].as_str().unwrap_or("");
+                        let sev = json["severity"].as_str().unwrap_or("");
+                        let pid = json["pid"].as_str().unwrap_or("");
+                        let msg = json["message"].as_str().unwrap_or("").replace("\"", "\"\"");
+                        
+                        csv_output.push_str(&format!("\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
+                            ts, host, src, u, sev, pid, msg));
+                    }
+                }
+                
+                if let Some(output_path) = output {
+                    std::fs::write(&output_path, csv_output)?;
+                    println!("CSV exported to {}", output_path);
+                } else {
+                    print!("{}", csv_output);
+                }
+            }
+            ExportTarget::Json {
+                since,
+                min_severity,
+                source,
+                unit,
+                hostname,
+                contains,
+                limit,
+                output,
+            } => {
+                let mut parts: Vec<String> = vec!["QUERY_LOGS".into(), format!("since={}", since)];
+                if let Some(v) = min_severity { parts.push(format!("min_severity={}", v)); }
+                if let Some(v) = source { parts.push(format!("source={}", v)); }
+                if let Some(v) = unit { parts.push(format!("unit={}", v)); }
+                if let Some(v) = hostname { parts.push(format!("hostname={}", v)); }
+                if let Some(v) = contains {
+                    let enc = urlencoding::encode(&v);
+                    parts.push(format!("contains={}", enc));
+                }
+                parts.push(format!("limit={}", limit));
+                parts.push("order=asc".into());
+                let cmd = parts.join(" ");
+                let response = send_request(&cli.socket, &cmd)?;
+                
+                // Convert JSONL to JSON array
+                let mut json_array = Vec::new();
+                for line in response.lines() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                        json_array.push(json);
+                    }
+                }
+                
+                let json_output = serde_json::to_string_pretty(&json_array)?;
+                
+                if let Some(output_path) = output {
+                    std::fs::write(&output_path, json_output)?;
+                    println!("JSON exported to {}", output_path);
+                } else {
+                    println!("{}", json_output);
+                }
+            }
+        },
         Commands::Config { action } => match action {
             ConfigAction::List => {
                 let response = send_request(&cli.socket, "CONFIG LIST")?;
@@ -297,7 +504,7 @@ fn main() -> Result<()> {
         Commands::Search { query, n_results, since, source, unit, severity } => {
             let mut parts = vec![
                 "SEARCH".into(),
-                format!("query={}", urlencoding::encode(query)),
+                format!("query={}", urlencoding::encode(&query)),
                 format!("n_results={}", n_results),
             ];
             if let Some(s) = since { parts.push(format!("since={}", s)); }
@@ -322,6 +529,82 @@ fn main() -> Result<()> {
             let cmd = format!("ANOMALIES since={}", since);
             let response = send_request(&cli.socket, &cmd)?;
             print!("{}", response);
+        }
+        Commands::AnomalyScan { since, format } => {
+            let cmd = format!("ANOMALIES since={}", since);
+            let response = send_request(&cli.socket, &cmd)?;
+            
+            match format.as_str() {
+                "json" => {
+                    print!("{}", response);
+                }
+                "table" => {
+                    println!("ANOMALY SCAN RESULTS (last {} seconds)", since);
+                    println!("{:<20} {:<15} {:<10} {:<50}", "Timestamp", "Type", "Severity", "Description");
+                    println!("{:-<95}", "");
+                    
+                    for line in response.lines() {
+                        if line.trim().is_empty() {
+                            continue;
+                        }
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                            let ts = json["timestamp"].as_str().unwrap_or("N/A");
+                            let anomaly_type = json["type"].as_str().unwrap_or("unknown");
+                            let severity = json["severity"].as_str().unwrap_or("info");
+                            let desc = json["description"].as_str().unwrap_or("No description");
+                            
+                            println!("{:<20} {:<15} {:<10} {:<50}", 
+                                ts, anomaly_type, severity, desc);
+                        }
+                    }
+                }
+                "summary" => {
+                    let mut anomaly_count = 0;
+                    let mut severity_counts = std::collections::HashMap::new();
+                    
+                    for line in response.lines() {
+                        if line.trim().is_empty() {
+                            continue;
+                        }
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                            anomaly_count += 1;
+                            let severity = json["severity"].as_str().unwrap_or("unknown").to_string();
+                            *severity_counts.entry(severity).or_insert(0) += 1;
+                        }
+                    }
+                    
+                    println!("ANOMALY SCAN SUMMARY (last {} seconds)", since);
+                    println!("Total anomalies found: {}", anomaly_count);
+                    if !severity_counts.is_empty() {
+                        println!("By severity:");
+                        for (severity, count) in severity_counts {
+                            println!("  {}: {}", severity, count);
+                        }
+                    }
+                    
+                    if anomaly_count > 0 {
+                        println!("\nDetailed results:");
+                        for line in response.lines() {
+                            if line.trim().is_empty() {
+                                continue;
+                            }
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                                let ts = json["timestamp"].as_str().unwrap_or("N/A");
+                                let anomaly_type = json["type"].as_str().unwrap_or("unknown");
+                                let severity = json["severity"].as_str().unwrap_or("info");
+                                let desc = json["description"].as_str().unwrap_or("No description");
+                                
+                                println!("[{}] {} ({}): {}", ts, anomaly_type, severity, desc);
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    eprintln!("Unknown format: {}. Using summary format.", format);
+                    // Recursive call with summary format
+                    return main();
+                }
+            }
         }
         Commands::Metrics { metric_type, since, limit } => {
             let mut parts = vec![
@@ -348,6 +631,201 @@ fn main() -> Result<()> {
             let cmd = parts.join(" ");
             let response = send_request(&cli.socket, &cmd)?;
             print!("{}", response);
+        }
+        Commands::Chat { query, model, clear_history } => {
+            let mut parts = vec![
+                "CHAT".into(),
+                format!("query={}", urlencoding::encode(&query)),
+                format!("model={}", model),
+            ];
+            if clear_history {
+                parts.push("clear_history=true".into());
+            }
+            let cmd = parts.join(" ");
+            let response = send_request(&cli.socket, &cmd)?;
+            print!("{}", response);
+        }
+        Commands::ChatHistory { limit } => {
+            let cmd = format!("CHAT_HISTORY limit={}", limit);
+            let response = send_request(&cli.socket, &cmd)?;
+            print!("{}", response);
+        }
+        Commands::ChatClear => {
+            let response = send_request(&cli.socket, "CHAT_CLEAR")?;
+            println!("{}", response.trim_end());
+        }
+        Commands::OllamaHealth => {
+            let response = send_request(&cli.socket, "OLLAMA_HEALTH")?;
+            print!("{}", response);
+        }
+        Commands::OllamaModels => {
+            let response = send_request(&cli.socket, "OLLAMA_MODELS")?;
+            print!("{}", response);
+        }
+        Commands::Completions { shell } => {
+            clap_complete::generate(shell, &mut Cli::command(), "chimera", &mut std::io::stdout());
+        }
+        Commands::Help { command } => {
+            match command.as_deref() {
+                Some("chat") => {
+                    println!("CHAT COMMAND HELP");
+                    println!("================");
+                    println!("Chat with AI assistant using RAG (Retrieval-Augmented Generation)");
+                    println!();
+                    println!("Usage:");
+                    println!("  chimera chat --query \"What errors occurred in the last hour?\"");
+                    println!("  chimera chat --query \"Analyze system performance\" --model llama3.2:3b");
+                    println!("  chimera chat --query \"New conversation\" --clear-history");
+                    println!();
+                    println!("Options:");
+                    println!("  --query TEXT     The question or message to send to the AI");
+                    println!("  --model MODEL    Ollama model to use (default: llama3.2:3b)");
+                    println!("  --clear-history  Clear conversation history before this query");
+                    println!();
+                    println!("Examples:");
+                    println!("  # Ask about recent errors");
+                    println!("  chimera chat --query \"What errors or warnings appeared in the logs recently?\"");
+                    println!();
+                    println!("  # Get system analysis");
+                    println!("  chimera chat --query \"Analyze the current system health and identify any issues\"");
+                    println!();
+                    println!("  # Troubleshoot specific service");
+                    println!("  chimera chat --query \"What's wrong with the nginx service?\"");
+                }
+                Some("search") => {
+                    println!("SEARCH COMMAND HELP");
+                    println!("==================");
+                    println!("Semantic search through logs using AI embeddings");
+                    println!();
+                    println!("Usage:");
+                    println!("  chimera search --query \"authentication failures\"");
+                    println!("  chimera search --query \"disk space issues\" --since 86400 --n-results 20");
+                    println!();
+                    println!("Options:");
+                    println!("  --query TEXT     Search query");
+                    println!("  --n-results N    Number of results (default: 10)");
+                    println!("  --since SECONDS  Look back window in seconds");
+                    println!("  --source SOURCE  Filter by log source");
+                    println!("  --unit UNIT      Filter by systemd unit");
+                    println!("  --severity SEV   Filter by severity level");
+                }
+                Some("export") => {
+                    println!("EXPORT COMMAND HELP");
+                    println!("==================");
+                    println!("Export logs in various formats");
+                    println!();
+                    println!("Usage:");
+                    println!("  chimera export csv --since 3600 --output logs.csv");
+                    println!("  chimera export json --min-severity err --limit 500 --output errors.json");
+                    println!();
+                    println!("Formats:");
+                    println!("  csv    Export as CSV file");
+                    println!("  json   Export as JSON file");
+                    println!();
+                    println!("Options:");
+                    println!("  --since SECONDS    Look back window in seconds");
+                    println!("  --min-severity SEV Minimum severity level");
+                    println!("  --source SOURCE    Filter by log source");
+                    println!("  --unit UNIT        Filter by systemd unit");
+                    println!("  --hostname HOST    Filter by hostname");
+                    println!("  --contains TEXT    Substring search in message");
+                    println!("  --limit N          Maximum number of records");
+                    println!("  --output FILE      Output file path (default: stdout)");
+                }
+                Some("anomaly-scan") => {
+                    println!("ANOMALY SCAN COMMAND HELP");
+                    println!("========================");
+                    println!("Trigger anomaly detection and view results");
+                    println!();
+                    println!("Usage:");
+                    println!("  chimera anomaly-scan --since 3600");
+                    println!("  chimera anomaly-scan --since 86400 --format table");
+                    println!();
+                    println!("Options:");
+                    println!("  --since SECONDS  Look back window in seconds");
+                    println!("  --format FORMAT  Output format: json, table, summary (default: summary)");
+                    println!();
+                    println!("Formats:");
+                    println!("  json     Raw JSON output");
+                    println!("  table    Formatted table");
+                    println!("  summary  Summary with details");
+                }
+                Some("ollama") => {
+                    println!("OLLAMA COMMANDS HELP");
+                    println!("===================");
+                    println!("Manage Ollama integration for AI features");
+                    println!();
+                    println!("Commands:");
+                    println!("  chimera ollama-health    Check Ollama service status");
+                    println!("  chimera ollama-models    List available models");
+                    println!();
+                    println!("Setup:");
+                    println!("  1. Install Ollama: https://ollama.ai");
+                    println!("  2. Pull a model: ollama pull llama3.2:3b");
+                    println!("  3. Test: chimera ollama-health");
+                }
+                _ => {
+                    println!("CHIMERA LOGMIND CORE - COMPREHENSIVE HELP");
+                    println!("=========================================");
+                    println!();
+                    println!("Core Commands:");
+                    println!("  ping              Test API connectivity");
+                    println!("  health            Check API health");
+                    println!("  version           Show API version");
+                    println!();
+                    println!("Log Management:");
+                    println!("  ingest journal    Ingest journald logs");
+                    println!("  ingest all        Ingest from all sources");
+                    println!("  query logs        Query logs with filters");
+                    println!("  export csv/json   Export logs in various formats");
+                    println!();
+                    println!("AI & Search:");
+                    println!("  search            Semantic log search");
+                    println!("  index             Index logs for search");
+                    println!("  chat              RAG chat with AI assistant");
+                    println!("  chat-history      View chat history");
+                    println!("  chat-clear        Clear chat history");
+                    println!();
+                    println!("Monitoring:");
+                    println!("  anomalies         Detect log anomalies");
+                    println!("  anomaly-scan      Enhanced anomaly scanning");
+                    println!("  metrics           Get system metrics");
+                    println!("  collect-metrics   Collect current metrics");
+                    println!("  alerts            View system alerts");
+                    println!();
+                    println!("Configuration:");
+                    println!("  config list       List log sources");
+                    println!("  config get        Get full configuration");
+                    println!("  config add-source Add new log source");
+                    println!("  config remove-source Remove log source");
+                    println!("  config update-source Update log source");
+                    println!();
+                    println!("Ollama Integration:");
+                    println!("  ollama-health     Check Ollama status");
+                    println!("  ollama-models     List available models");
+                    println!();
+                    println!("Utilities:");
+                    println!("  completions       Generate shell completions");
+                    println!("  help --command    Show detailed help for specific command");
+                    println!();
+                    println!("Examples:");
+                    println!("  # Quick system check");
+                    println!("  chimera health && chimera metrics --since 3600");
+                    println!();
+                    println!("  # Investigate issues");
+                    println!("  chimera search --query \"error authentication\" --since 3600");
+                    println!("  chimera chat --query \"What's causing these authentication errors?\"");
+                    println!();
+                    println!("  # Export for analysis");
+                    println!("  chimera export csv --min-severity err --since 86400 --output errors.csv");
+                    println!();
+                    println!("  # Monitor anomalies");
+                    println!("  chimera anomaly-scan --since 3600 --format summary");
+                    println!();
+                    println!("For detailed help on specific commands:");
+                    println!("  chimera help --command <command-name>");
+                }
+            }
         }
     }
 

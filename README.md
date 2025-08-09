@@ -12,6 +12,12 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
   - `anomalies` for log anomaly detection
   - `metrics` and `alerts` for system health monitoring
   - `config` commands for log source management
+  - **NEW: `chat --query "text"` for RAG-based AI chat with log context**
+  - **NEW: `export csv/json` for log export in various formats**
+  - **NEW: `anomaly-scan` for enhanced anomaly detection with multiple output formats**
+  - **NEW: `ollama-health` and `ollama-models` for Ollama integration management**
+  - **NEW: `completions` for shell auto-completion generation**
+  - **NEW: `help --command` for detailed command help and examples**
 - Python backend (`api/server.py`) listening on `/run/chimera/api.sock` (or `CHIMERA_API_SOCKET`)
   - Concurrency via threads
   - DuckDB storage + schema initialization
@@ -22,7 +28,10 @@ Offline-first, single-host forensic and log analytics. Rust CLI + Python UDS bac
   - Anomaly detection for log patterns
   - System health monitoring with metrics and alerts
   - Configuration management for log sources
-- Minimal TUI (`chimera-tui`) with tabs for logs, search, health, and actions
+  - **NEW: RAG chat engine with Ollama integration**
+  - **NEW: Conversation history management**
+  - **NEW: Ollama health and model management**
+- Minimal TUI (`chimera-tui`) with tabs for logs, search, health, **chat**, and actions
 - Ops: installer and systemd unit for production use
 
 ## Quickstart (development)
@@ -42,6 +51,11 @@ export CHIMERA_API_SOCKET=/tmp/chimera/api.sock
 cargo run --manifest-path cli/Cargo.toml -- ping
 cargo run --manifest-path cli/Cargo.toml -- ingest journal --seconds 300 --limit 100
 cargo run --manifest-path cli/Cargo.toml -- query logs --since 600 --limit 20
+
+# NEW: Try RAG chat (requires Ollama)
+cargo run --manifest-path cli/Cargo.toml -- chat --query "What errors occurred recently?"
+cargo run --manifest-path cli/Cargo.toml -- export csv --since 3600 --output logs.csv
+cargo run --manifest-path cli/Cargo.toml -- anomaly-scan --since 3600 --format summary
 ```
 
 ### TUI
@@ -51,7 +65,7 @@ cargo build --manifest-path cli/Cargo.toml
 # Run the TUI (uses CHIMERA_API_SOCKET or defaults to /run/chimera/api.sock)
 ./cli/target/debug/chimera-tui
 ```
-Keys: q quit, ←/→ switch tabs, ↑/↓ select, r refresh, i ingest 5m, I ingest 1h.
+Keys: q quit, ←/→ switch tabs, ↑/↓ select, r refresh, i ingest 5m, I ingest 1h, **c start chat**.
 
 ## Production install (systemd)
 Prereqs: `journalctl` access and DuckDB for Python.
@@ -82,6 +96,11 @@ newgrp chimera
 - `COLLECT_METRICS` → `OK collected=N`
 - `ALERTS [since=SEC] [severity=…] [acknowledged=BOOL]` → NDJSON
 - `CONFIG GET|LIST|ADD_SOURCE|REMOVE_SOURCE|UPDATE_SOURCE` → JSON/OK
+- **NEW: `CHAT query="text" [model=MODEL] [clear_history=BOOL]` → JSON**
+- **NEW: `CHAT_HISTORY [limit=N]` → NDJSON**
+- **NEW: `CHAT_CLEAR` → `OK history-cleared`**
+- **NEW: `OLLAMA_HEALTH` → JSON**
+- **NEW: `OLLAMA_MODELS` → JSON**
 
 ## Environment variables
 - `CHIMERA_API_SOCKET` (default `/run/chimera/api.sock`)
@@ -101,6 +120,10 @@ newgrp chimera
 - Semantic search requires Ollama with nomic-embed-text model
 - System health monitoring requires psutil and systemd access
 - ChromaDB stores embeddings in `/var/lib/chimera/chromadb`
+- **NEW: RAG chat requires Ollama with a chat model (e.g., llama3.2:3b)**
+- **NEW: Export commands support CSV and JSON formats with file output**
+- **NEW: Enhanced anomaly scanning with multiple output formats (json, table, summary)**
+- **NEW: Shell completion generation for bash, zsh, fish, etc.**
 
 ## License
 TBD

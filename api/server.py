@@ -16,6 +16,7 @@ try:
     from .ingest_framework import IngestionFramework  # type: ignore
     from .embeddings import SemanticSearchEngine, AnomalyDetector  # type: ignore
     from .system_health import SystemHealthMonitor  # type: ignore
+    from .rag_chat import RAGChatEngine  # type: ignore
 except Exception:
     # Fallback to relative imports when executed directly
     from db import get_connection, initialize_schema  # type: ignore
@@ -24,6 +25,7 @@ except Exception:
     from ingest_framework import IngestionFramework  # type: ignore
     from embeddings import SemanticSearchEngine, AnomalyDetector  # type: ignore
     from system_health import SystemHealthMonitor  # type: ignore
+    from rag_chat import RAGChatEngine  # type: ignore
 
 # Load configuration
 config = ChimeraConfig.load()
@@ -532,6 +534,99 @@ def handle_client(conn: socket.socket, db_path: Optional[str]) -> None:
                 # Stream alerts as JSONL
                 for alert in alerts:
                     conn.sendall((json.dumps(alert) + "\n").encode())
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("CHAT"):
+            # Usage: CHAT query="text" [model=MODEL] [clear_history=BOOL]
+            try:
+                if len(tokens) < 2:
+                    conn.sendall(b"ERR chat-query-required\n")
+                    return
+                
+                # Parse arguments
+                args = {}
+                query = None
+                for tok in tokens[1:]:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        if k == "query":
+                            try:
+                                from urllib.parse import unquote
+                                query = unquote(v)
+                            except Exception:
+                                query = v
+                        elif k == "clear_history":
+                            args[k] = v.lower() == "true"
+                        else:
+                            args[k] = v
+                
+                if not query:
+                    conn.sendall(b"ERR chat-query-required\n")
+                    return
+                
+                model = args.get("model", "llama3.2:3b")
+                clear_history = args.get("clear_history", False)
+                
+                chat_engine = RAGChatEngine(db_path)
+                
+                if clear_history:
+                    chat_engine.clear_history()
+                
+                response = chat_engine.generate_response(query, model)
+                conn.sendall((json.dumps(response) + "\n").encode())
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("CHAT_HISTORY"):
+            # Usage: CHAT_HISTORY [limit=N]
+            try:
+                args = {}
+                for tok in tokens[1:]:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        args[k] = v
+                
+                limit = int(args.get("limit", 10))
+                
+                chat_engine = RAGChatEngine(db_path)
+                history = chat_engine.get_conversation_history(limit)
+                
+                # Stream history as JSONL
+                for msg in history:
+                    conn.sendall((json.dumps(msg) + "\n").encode())
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("CHAT_CLEAR"):
+            # Usage: CHAT_CLEAR
+            try:
+                chat_engine = RAGChatEngine(db_path)
+                chat_engine.clear_history()
+                conn.sendall(b"OK history-cleared\n")
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("OLLAMA_HEALTH"):
+            # Usage: OLLAMA_HEALTH
+            try:
+                chat_engine = RAGChatEngine(db_path)
+                health = chat_engine.check_ollama_health()
+                conn.sendall((json.dumps(health) + "\n").encode())
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("OLLAMA_MODELS"):
+            # Usage: OLLAMA_MODELS
+            try:
+                chat_engine = RAGChatEngine(db_path)
+                models = chat_engine.get_available_models()
+                conn.sendall((json.dumps({"models": models}) + "\n").encode())
                     
             except Exception as exc:
                 conn.sendall(f"ERR {exc}\n".encode())
