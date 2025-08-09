@@ -16,7 +16,6 @@ use urlencoding;
 #[derive(Debug, Clone)]
 struct LogItem {
     ts: String,
-    hostname: String,
     unit: String,
     severity: String,
     message: String,
@@ -33,7 +32,6 @@ struct ChatMessage {
 struct ChatResponse {
     response: String,
     confidence: f64,
-    query_time: f64,
     sources_count: i64,
 }
 
@@ -63,11 +61,10 @@ fn fetch_logs(socket: &str, since: i64, limit: i64) -> Result<Vec<LogItem>> {
         match serde_json::from_str::<serde_json::Value>(line) {
             Ok(v) => {
                 let ts = v.get("ts").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                let hostname = v.get("hostname").and_then(|x| x.as_str()).unwrap_or("").to_string();
                 let unit = v.get("unit").and_then(|x| x.as_str()).unwrap_or("").to_string();
                 let severity = v.get("severity").and_then(|x| x.as_str()).unwrap_or("").to_string();
                 let message = v.get("message").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                out.push(LogItem { ts, hostname, unit, severity, message });
+                out.push(LogItem { ts, unit, severity, message });
             }
             Err(_) => {}
         }
@@ -86,16 +83,14 @@ fn send_chat_message(socket: &str, message: &str) -> Result<ChatResponse> {
     
     // Parse JSON response
     if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&resp) {
-        if let (Some(response), Some(confidence), Some(query_time), Some(sources_count)) = (
+        if let (Some(response), Some(confidence), Some(sources_count)) = (
             json_value.get("response").and_then(|v| v.as_str()),
             json_value.get("confidence").and_then(|v| v.as_f64()),
-            json_value.get("query_time").and_then(|v| v.as_f64()),
             json_value.get("sources_count").and_then(|v| v.as_i64()),
         ) {
             return Ok(ChatResponse {
                 response: response.to_string(),
                 confidence,
-                query_time,
                 sources_count,
             });
         }
@@ -104,31 +99,7 @@ fn send_chat_message(socket: &str, message: &str) -> Result<ChatResponse> {
     Err(anyhow::anyhow!("Failed to parse chat response"))
 }
 
-fn get_chat_history(socket: &str) -> Result<Vec<ChatMessage>> {
-    let resp = uds_request(socket, "CHAT_HISTORY")?;
-    
-    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&resp) {
-        if let Some(history) = json_value.get("history").and_then(|v| v.as_array()) {
-            let mut messages = Vec::new();
-            for msg in history {
-                if let (Some(role), Some(content), Some(timestamp)) = (
-                    msg.get("role").and_then(|v| v.as_str()),
-                    msg.get("content").and_then(|v| v.as_str()),
-                    msg.get("timestamp").and_then(|v| v.as_f64()),
-                ) {
-                    messages.push(ChatMessage {
-                        role: role.to_string(),
-                        content: content.to_string(),
-                        timestamp,
-                    });
-                }
-            }
-            return Ok(messages);
-        }
-    }
-    
-    Ok(Vec::new())
-}
+
 
 fn main() -> Result<()> {
     let socket = std::env::var("CHIMERA_API_SOCKET").unwrap_or_else(|_| "/run/chimera/api.sock".to_string());
@@ -253,12 +224,12 @@ fn main() -> Result<()> {
                         .block(Block::default().borders(Borders::ALL).title("Security Audits"));
                     f.render_widget(help, chunks[1]);
                 }
-                }
-                _ => {
+                6 => {
                     let help = Paragraph::new("Keys: i=ingest 5m, I=ingest 1h, r=refresh, q=quit, ←/→ tabs, ↑/↓ select, c=chat")
                         .block(Block::default().borders(Borders::ALL).title("Actions"));
                     f.render_widget(help, chunks[1]);
                 }
+                _ => {}
             }
 
             let status_p = Paragraph::new(status.clone())

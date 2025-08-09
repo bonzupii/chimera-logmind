@@ -217,7 +217,6 @@ enum AuditAction {
         id: i64,
     },
 }
-}
 
 #[derive(Subcommand, Debug)]
 enum IngestTarget {
@@ -411,7 +410,7 @@ fn main() -> Result<()> {
         Commands::Search { query, n_results, since, source, unit, severity } => {
             let mut parts = vec![
                 "SEARCH".into(),
-                format!("query={}", urlencoding::encode(query)),
+                format!("query={}", urlencoding::encode(&query)),
                 format!("n_results={}", n_results),
             ];
             if let Some(s) = since { parts.push(format!("since={}", s)); }
@@ -465,9 +464,9 @@ fn main() -> Result<()> {
         }
         Commands::Chat { mode } => match mode {
             ChatMode::Query { query, context_size, since } => {
-                let mut parts = vec![
+                let parts = vec![
                     "CHAT".into(),
-                    format!("query={}", urlencoding::encode(query)),
+                    format!("query={}", urlencoding::encode(&query)),
                     format!("context_size={}", context_size),
                     format!("since={}", since),
                 ];
@@ -476,7 +475,7 @@ fn main() -> Result<()> {
                 print!("{}", response);
             }
             ChatMode::Interactive { context_size, since } => {
-                let mut parts = vec![
+                let parts = vec![
                     "CHAT".into(),
                     format!("context_size={}", context_size),
                     format!("since={}", since),
@@ -520,11 +519,11 @@ fn main() -> Result<()> {
             ReportAction::Send { to, since, subject } => {
                 let mut parts = vec![
                     "REPORT SEND".into(),
-                    format!("to={}", urlencoding::encode(to)),
+                    format!("to={}", urlencoding::encode(&to)),
                     format!("since={}", since),
                 ];
                 if let Some(subj) = subject {
-                    parts.push(format!("subject={}", urlencoding::encode(subj)));
+                    parts.push(format!("subject={}", urlencoding::encode(&subj)));
                 }
                 let cmd = parts.join(" ");
                 let response = send_request(&cli.socket, &cmd)?;
@@ -564,7 +563,6 @@ fn main() -> Result<()> {
                 let response = send_request(&cli.socket, &cmd)?;
                 print!("{}", response);
             }
-        }
         }
     }
 

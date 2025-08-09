@@ -410,7 +410,7 @@ class RAGChatEngine:
     
     def __init__(self, db_path: Optional[str] = None, 
                  ollama_url: str = "http://localhost:11434",
-                 ollama_model: str = "llama2",
+                 ollama_model: str = "qwen3:1.7b",
                  chroma_persist_dir: str = "/var/lib/chimera/chromadb"):
         self.db_path = db_path
         self.ollama_url = ollama_url.rstrip('/')

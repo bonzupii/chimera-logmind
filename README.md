@@ -120,11 +120,7 @@ newgrp chimera
 - `contains` uses a simple `ILIKE` filter; for large-scale search, consider DuckDB FTS in a future phase
 - Cursor-based ingest avoids duplicates and reprocessing
 - Semantic search requires Ollama with nomic-embed-text model
-<<<<<<< HEAD
-- RAG chat requires Ollama with llama2 or similar LLM model
-=======
-- RAG chat requires Ollama with llama2 model (or other compatible model)
->>>>>>> origin/main
+- RAG chat requires Ollama with llama2 or compatible LLM model
 - System health monitoring requires psutil and systemd access
 - ChromaDB stores embeddings in `/var/lib/chimera/chromadb`
 - Security auditing requires installation of auditd, aide, rkhunter, chkrootkit, clamav, openscap, and lynis
