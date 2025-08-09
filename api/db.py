@@ -44,6 +44,33 @@ def get_connection(db_path: Optional[str] = None):
 def initialize_schema(conn) -> None:
     logger.info("Initializing database schema...")
 
+    def ensure_column_exists(table_name: str, column_name: str, column_type: str) -> None:
+        """Add a column only if it does not already exist (avoids startup warnings)."""
+        try:
+            exists = (
+                conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM information_schema.columns
+                    WHERE table_name = ? AND column_name = ?
+                    """,
+                    [table_name, column_name],
+                ).fetchone()[0]
+                > 0
+            )
+        except Exception as e:
+            logger.warning(f"Failed to check column existence for {table_name}.{column_name}: {e}")
+            exists = False
+        if not exists:
+            try:
+                conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+                logger.debug(f"Added '{column_name}' column to '{table_name}' table.")
+            except Exception as e:
+                # If this fails, surface it once here rather than warn every startup
+                logger.warning(
+                    f"Could not add '{column_name}' column to '{table_name}' table: {e}"
+                )
+
     # Best-effort: if an older installation exists, make sure required columns exist
     try:
         table_exists = conn.execute(
@@ -51,16 +78,8 @@ def initialize_schema(conn) -> None:
         ).fetchone()[0]
         if table_exists:
             # Ensure optional columns exist (pre-migration)
-            try:
-                conn.execute("ALTER TABLE logs ADD COLUMN fingerprint TEXT")
-                logger.debug("Added 'fingerprint' column to 'logs' table (if not exists).")
-            except Exception:
-                pass
-            try:
-                conn.execute("ALTER TABLE logs ADD COLUMN cursor TEXT")
-                logger.debug("Added 'cursor' column to 'logs' table (if not exists).")
-            except Exception:
-                pass
+            ensure_column_exists("logs", "fingerprint", "TEXT")
+            ensure_column_exists("logs", "cursor", "TEXT")
             # If id column missing, migrate to new table with synthetic IDs
             id_missing = (
                 conn.execute(
@@ -159,17 +178,9 @@ def initialize_schema(conn) -> None:
     except Exception as e:
         logger.error(f"Error creating log_embeddings table: {e}")
         raise
-    # Backfill columns for existing installations (best-effort)
-    try:
-        conn.execute("ALTER TABLE logs ADD COLUMN fingerprint TEXT")
-        logger.debug("Added 'fingerprint' column to 'logs' table (if not exists).")
-    except Exception as e:
-        logger.warning(f"Could not add 'fingerprint' column to 'logs' table: {e}")
-    try:
-        conn.execute("ALTER TABLE logs ADD COLUMN cursor TEXT")
-        logger.debug("Added 'cursor' column to 'logs' table (if not exists).")
-    except Exception as e:
-        logger.warning(f"Could not add 'cursor' column to 'logs' table: {e}")
+    # Backfill columns for existing installations (idempotent, without warnings)
+    ensure_column_exists("logs", "fingerprint", "TEXT")
+    ensure_column_exists("logs", "cursor", "TEXT")
     
     try:
         conn.execute(
