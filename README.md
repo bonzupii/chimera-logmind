@@ -144,4 +144,4 @@ newgrp chimera
 - DuckDB currently does not support ON DELETE CASCADE in foreign keys; `log_embeddings` references `logs(id)` without cascade.
 
 ## License
-TBD
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
