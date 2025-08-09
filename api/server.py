@@ -16,6 +16,7 @@ try:
     from .ingest_framework import IngestionFramework  # type: ignore
     from .embeddings import SemanticSearchEngine, AnomalyDetector  # type: ignore
     from .system_health import SystemHealthMonitor  # type: ignore
+    from .rag_chat import RAGChatEngine  # type: ignore
 except Exception:
     # Fallback to relative imports when executed directly
     from db import get_connection, initialize_schema  # type: ignore
@@ -24,6 +25,7 @@ except Exception:
     from ingest_framework import IngestionFramework  # type: ignore
     from embeddings import SemanticSearchEngine, AnomalyDetector  # type: ignore
     from system_health import SystemHealthMonitor  # type: ignore
+    from rag_chat import RAGChatEngine  # type: ignore
 
 # Load configuration
 config = ChimeraConfig.load()
@@ -532,6 +534,89 @@ def handle_client(conn: socket.socket, db_path: Optional[str]) -> None:
                 # Stream alerts as JSONL
                 for alert in alerts:
                     conn.sendall((json.dumps(alert) + "\n").encode())
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("CHAT"):
+            # Usage: CHAT message="text"
+            try:
+                if len(tokens) < 2:
+                    conn.sendall(b"ERR chat-message-required\n")
+                    return
+                
+                # Parse message argument
+                message = None
+                for tok in tokens[1:]:
+                    if "=" in tok:
+                        k, v = tok.split("=", 1)
+                        if k == "message":
+                            try:
+                                from urllib.parse import unquote
+                                message = unquote(v)
+                            except Exception:
+                                message = v
+                
+                if not message:
+                    conn.sendall(b"ERR chat-message-required\n")
+                    return
+                
+                # Initialize chat engine
+                db_conn = get_connection(db_path)
+                search_engine = SemanticSearchEngine(db_path)
+                chat_engine = RAGChatEngine(db_conn, search_engine)
+                
+                # Process chat message
+                response = chat_engine.chat(message)
+                
+                # Send response as JSON
+                result = {
+                    "response": response.response,
+                    "confidence": response.confidence,
+                    "query_time": response.query_time,
+                    "sources_count": len(response.sources)
+                }
+                conn.sendall((json.dumps(result) + "\n").encode())
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("CHAT_HISTORY"):
+            # Usage: CHAT_HISTORY
+            try:
+                db_conn = get_connection(db_path)
+                search_engine = SemanticSearchEngine(db_path)
+                chat_engine = RAGChatEngine(db_conn, search_engine)
+                history = chat_engine.get_conversation_history()
+                
+                # Send history as JSON
+                conn.sendall((json.dumps({"history": history}) + "\n").encode())
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("CHAT_CLEAR"):
+            # Usage: CHAT_CLEAR
+            try:
+                db_conn = get_connection(db_path)
+                search_engine = SemanticSearchEngine(db_path)
+                chat_engine = RAGChatEngine(db_conn, search_engine)
+                chat_engine.clear_history()
+                conn.sendall(b"OK history-cleared\n")
+                    
+            except Exception as exc:
+                conn.sendall(f"ERR {exc}\n".encode())
+        
+        elif command.startswith("CHAT_STATS"):
+            # Usage: CHAT_STATS
+            try:
+                db_conn = get_connection(db_path)
+                search_engine = SemanticSearchEngine(db_path)
+                chat_engine = RAGChatEngine(db_conn, search_engine)
+                stats = chat_engine.get_system_stats()
+                
+                # Send stats as JSON
+                conn.sendall((json.dumps(stats) + "\n").encode())
                     
             except Exception as exc:
                 conn.sendall(f"ERR {exc}\n".encode())
