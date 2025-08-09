@@ -6,10 +6,12 @@ After=network.target
 Type=simple
 User=chimera
 Group=chimera
+WorkingDirectory=/opt/chimera
 SupplementaryGroups=systemd-journal
 Environment=CHIMERA_API_SOCKET=/run/chimera/api.sock
 Environment=CHIMERA_DB_PATH=/var/lib/chimera/chimera.duckdb
-WorkingDirectory=/opt/chimera
+# Optional: set log level via environment
+Environment=CHIMERA_LOG_LEVEL=INFO
 ExecStart=/opt/chimera/venv/bin/python3 -m api.server
 RuntimeDirectory=chimera
 RuntimeDirectoryMode=0750

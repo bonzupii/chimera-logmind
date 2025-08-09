@@ -230,9 +230,8 @@ class IngestionFramework:
                 for unit in source.config['units']:
                     cmd.extend(["-u", unit])
             
-            if source.config.get('exclude_units'):
-                for unit in source.config['exclude_units']:
-                    cmd.extend(["--exclude-unit", unit])
+            # Exclude units if configured (post-filter if journalctl lacks flag)
+            exclude_units = source.config.get('exclude_units', [])
             
             if limit:
                 cmd.extend(["-n", str(limit)])
@@ -242,7 +241,21 @@ class IngestionFramework:
             if proc.returncode != 0:
                 raise RuntimeError(f"journalctl failed: {proc.stderr.strip()}")
             
-            return self._process_entries(conn, source.name, proc.stdout.splitlines(), after_cursor)
+            lines = proc.stdout.splitlines()
+            if exclude_units:
+                filtered_lines = []
+                for line in lines:
+                    try:
+                        entry = json.loads(line)
+                        unit_name = entry.get("_SYSTEMD_UNIT") or entry.get("SYSLOG_IDENTIFIER") or ""
+                        if any(self._unit_matches_pattern(unit_name, pat) for pat in exclude_units):
+                            continue
+                        filtered_lines.append(line)
+                    except Exception:
+                        filtered_lines.append(line)
+                lines = filtered_lines
+
+            return self._process_entries(conn, source.name, lines, after_cursor)
             
         finally:
             conn.close()
@@ -381,7 +394,12 @@ class IngestionFramework:
             fp_src = f"{entry['ts']}|{entry['hostname']}|{entry['unit']}|{entry['severity']}|{entry['pid']}|{entry['message']}".encode()
             fingerprint = hashlib.sha256(fp_src).hexdigest()
             
+            # Deterministic numeric id from fingerprint (first 8 bytes of sha256)
+            import hashlib as _hashlib
+            digest = _hashlib.sha256(fp_src).digest()
+            numeric_id = int.from_bytes(digest[:8], byteorder="big", signed=True)
             row = (
+                numeric_id,
                 entry['ts'], entry['hostname'], entry['source'], entry['unit'],
                 entry['facility'], entry['severity'], entry['pid'], entry['uid'],
                 entry['gid'], entry['message'], entry['raw'], fingerprint, entry['cursor']
@@ -398,19 +416,28 @@ class IngestionFramework:
         cur = conn.cursor()
         cur.executemany(
             """
-            INSERT INTO logs (ts, hostname, source, unit, facility, severity, pid, uid, gid, message, raw, fingerprint, cursor)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO logs (id, ts, hostname, source, unit, facility, severity, pid, uid, gid, message, raw, fingerprint, cursor)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT DO NOTHING
             """,
             rows,
         )
-        
+
         # Update cursor if advanced
         if last_seen_cursor and last_seen_cursor != last_cursor:
             conn.execute(
-                "INSERT INTO ingest_state(source, cursor, updated_at) VALUES(?, ?, CURRENT_TIMESTAMP) "
-                "ON CONFLICT(source) DO UPDATE SET cursor=excluded.cursor, updated_at=CURRENT_TIMESTAMP",
+                "INSERT OR REPLACE INTO ingest_state(source, cursor, updated_at) VALUES(?, ?, CURRENT_TIMESTAMP)",
                 [source_name, last_seen_cursor],
             )
-        
+
         return (len(rows), conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0])
+
+    def _unit_matches_pattern(self, unit: str, pattern: str) -> bool:
+        # Simple glob-like pattern matching where * matches any substring
+        if pattern == unit:
+            return True
+        if '*' in pattern:
+            import re as _re
+            regex = '^' + _re.escape(pattern).replace('\\*', '.*') + '$'
+            return _re.match(regex, unit) is not None
+        return False
