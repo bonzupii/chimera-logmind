@@ -6,8 +6,43 @@ import socket
 import signal
 import sys
 import threading
+import logging
+import logging.handlers
 
 from typing import Optional
+
+# --- Logging Setup ---
+LOG_FILE = os.environ.get("CHIMERA_LOG_FILE", "/var/log/chimera/api.log")
+LOG_LEVEL = os.environ.get("CHIMERA_LOG_LEVEL", "DEBUG").upper()
+LOG_LEVEL = getattr(logging, LOG_LEVEL, logging.DEBUG)
+
+# Configure logger
+logger = logging.getLogger("chimera")
+logger.setLevel(LOG_LEVEL)
+
+formatter = logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+
+# Console handler (for systemd journal)
+console_handler = logging.StreamHandler(sys.stderr)
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
+
+# File handler (best effort)
+try:
+    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+    file_handler = logging.handlers.RotatingFileHandler(
+        LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5
+    )
+    file_handler.setLevel(LOG_LEVEL)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+except Exception as _log_exc:
+    # Fall back to console-only logging
+    logger.warning(f"File logging disabled: {_log_exc}")
+# --- End Logging Setup ---
 
 try:
     from .db import get_connection, initialize_schema
@@ -16,7 +51,8 @@ try:
     from .ingest_framework import IngestionFramework
     from .embeddings import SemanticSearchEngine, AnomalyDetector, RAGChatEngine
     from .system_health import SystemHealthMonitor
-except Exception:
+except Exception as e:
+    logger.error(f"Failed to import modules: {e}")
     # Fallback to relative imports when executed directly
     from db import get_connection, initialize_schema
     from ingest import ingest_journal_into_duckdb
@@ -24,11 +60,14 @@ except Exception:
     from ingest_framework import IngestionFramework
     from embeddings import SemanticSearchEngine, AnomalyDetector, RAGChatEngine
     from system_health import SystemHealthMonitor
+    logger.warning("Using fallback relative imports.")
+
 
 # Load configuration
 config = ChimeraConfig.load()
-DEFAULT_SOCKET_PATH = config.socket_path
-DEFAULT_DB_PATH = config.db_path
+DEFAULT_SOCKET_PATH = os.environ.get("CHIMERA_API_SOCKET", config.socket_path)
+DEFAULT_DB_PATH = os.environ.get("CHIMERA_DB_PATH", config.db_path)
+logger.info(f"Configuration loaded. Socket: {DEFAULT_SOCKET_PATH}, DB: {DEFAULT_DB_PATH}")
 
 
 def cleanup_socket(path: str) -> None:
@@ -40,7 +79,15 @@ def cleanup_socket(path: str) -> None:
 
 def ensure_dir(path: str) -> None:
     directory = os.path.dirname(path)
-    os.makedirs(directory, mode=0o750, exist_ok=True)
+    try:
+        os.makedirs(directory, mode=0o750, exist_ok=True)
+    except PermissionError:
+        # Fallback to per-user runtime dir if system dir is not writable
+        user_run = os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/chimera_{os.getuid()}"
+        fallback_dir = os.path.join(user_run, "chimera")
+        os.makedirs(fallback_dir, mode=0o750, exist_ok=True)
+        global DEFAULT_SOCKET_PATH
+        DEFAULT_SOCKET_PATH = os.path.join(fallback_dir, os.path.basename(path))
 
 
 def set_permissions(path: str) -> None:
@@ -815,6 +862,13 @@ def handle_client(conn: socket.socket, db_path: Optional[str]) -> None:
 
 
 def main() -> None:
+    # Re-evaluate configuration and env at runtime (important for tests)
+    global DEFAULT_SOCKET_PATH, DEFAULT_DB_PATH
+    _cfg = ChimeraConfig.load()
+    DEFAULT_SOCKET_PATH = os.environ.get("CHIMERA_API_SOCKET", _cfg.socket_path)
+    DEFAULT_DB_PATH = os.environ.get("CHIMERA_DB_PATH", _cfg.db_path)
+    logger.info(f"Runtime configuration. Socket: {DEFAULT_SOCKET_PATH}, DB: {DEFAULT_DB_PATH}")
+
     ensure_dir(DEFAULT_SOCKET_PATH)
     cleanup_socket(DEFAULT_SOCKET_PATH)
 
@@ -843,8 +897,13 @@ def main() -> None:
                     cleanup_socket(DEFAULT_SOCKET_PATH)
                     sys.exit(0)
 
-            signal.signal(signal.SIGINT, shutdown_handler)
-            signal.signal(signal.SIGTERM, shutdown_handler)
+            # Only install signal handlers in the main thread
+            try:
+                if threading.current_thread() is threading.main_thread():
+                    signal.signal(signal.SIGINT, shutdown_handler)
+                    signal.signal(signal.SIGTERM, shutdown_handler)
+            except Exception as _sig_exc:
+                logger.warning(f"Skipping signal handlers: {_sig_exc}")
 
             while True:
                 conn, _ = server.accept()

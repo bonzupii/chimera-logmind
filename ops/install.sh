@@ -29,6 +29,9 @@ source "$PREFIX/venv/bin/activate"
 # Install Python dependencies
 if command -v pip &> /dev/null; then
     pip install -r "$(dirname "$0")/../requirements.txt"
+    if [ -f "$(dirname "$0")/../requirements-dev.txt" ]; then
+        pip install -r "$(dirname "$0")/../requirements-dev.txt"
+    fi
 else
     echo "Warning: pip not found. Skipping Python dependency installation." >&2
 fi
@@ -115,6 +118,11 @@ install -d -m 0750 -o chimera -g chimera /run/chimera
 # Grant chimera user read access to the system journal
 if getent group systemd-journal >/dev/null 2>&1; then
   usermod -aG systemd-journal chimera || true
+  # Verify if the chimera user is now in the systemd-journal group
+  if ! id -nG chimera | grep -qw systemd-journal; then
+    echo "Warning: User 'chimera' is not a member of 'systemd-journal' group. Log ingestion may fail." >&2
+    echo "Please ensure 'chimera' user has read access to system journal." >&2
+  fi
 fi
 
 mkdir -p "$PREFIX/api"
