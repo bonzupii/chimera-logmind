@@ -132,11 +132,29 @@ Build **Chimera LogMind Core** — an offline-first, air-gapped, single-machine 
 
 ---
 
+## Completed Phases
+- ✅ Phase 0: Project Setup & API Contract
+- ✅ Phase 1: Core Log Ingestion & Storage  
+- ✅ Phase 1.5: Configurable & Flexible Log Ingestion
+- ✅ Phase 2: Semantic Search & Anomaly Detection
+- ✅ Phase 2.5: System Health & Resource Monitoring
+- ✅ Phase 3: Enhanced CLI Features and RAG Chat
+- ✅ Phase 4: Reporting and Delivery System
+- ✅ Phase 5: Security Auditing Integration
+
 ## Short-Term Next Actions
-1. Scaffold Rust CLI project with basic UDS client connectivity  
-2. Prototype Python API server exposing minimal ingestion endpoints over UDS  
-3. Write systemd unit files and bash install scripts for API and scan schedulers  
-4. Define DuckDB schema and begin journald ingestion prototype  
-5. Test local Ollama embedding integration with sample logs  
+1. Phase 6: Hardening, Packaging & Documentation
+   - Harden service accounts and UDS socket permissions
+   - SELinux/AppArmor policy templates
+   - Comprehensive test suites (unit, integration, end-to-end)
+   - Packaging: Debian `.deb` and tarball installers with systemd integration
+   - Admin runbooks, API docs, and CLI usage guides
+
+2. Phase 7: Optional Secure Log Shipping
+   - Implement configurable log export to a remote storage server via SCP
+   - Integrate log shipping with daily report scheduler or manual CLI trigger
+   - Support encryption, signing, and integrity verification of shipped logs
+   - CLI commands to manage, monitor, and troubleshoot log sync
+   - Documentation for secure offline-to-storage log transfer best practices  
 
 ---

@@ -139,8 +139,8 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut tab_index = 0usize; // 0: Logs, 1: Search, 2: Health, 3: Chat, 4: Actions
-    let titles = vec!["Logs", "Search", "Health", "Chat", "Actions"]; 
+    let mut tab_index = 0usize; // 0: Logs, 1: Search, 2: Health, 3: Chat, 4: Reports, 5: Security, 6: Actions
+    let titles = vec!["Logs", "Search", "Health", "Chat", "Reports", "Security", "Actions"];
     let mut logs: Vec<LogItem> = Vec::new();
     let mut status = String::new();
     let mut selected = 0usize;
@@ -200,7 +200,7 @@ fn main() -> Result<()> {
                     f.render_widget(help, chunks[1]);
                 }
                 3 => {
-                    // Chat tab
+                    // Chat tab with interactive chat interface
                     let chat_chunks = Layout::default()
                         .direction(Direction::Vertical)
                         .constraints([
@@ -242,6 +242,17 @@ fn main() -> Result<()> {
                     let input_para = Paragraph::new(input_text)
                         .block(Block::default().borders(Borders::ALL).title("Chat Input"));
                     f.render_widget(input_para, chat_chunks[1]);
+                }
+                4 => {
+                    let help = Paragraph::new("Reports: Use CLI 'chimera report generate' to create daily reports")
+                        .block(Block::default().borders(Borders::ALL).title("Reports"));
+                    f.render_widget(help, chunks[1]);
+                }
+                5 => {
+                    let help = Paragraph::new("Security: Use CLI 'chimera audit full' to run security audits")
+                        .block(Block::default().borders(Borders::ALL).title("Security Audits"));
+                    f.render_widget(help, chunks[1]);
+                }
                 }
                 _ => {
                     let help = Paragraph::new("Keys: i=ingest 5m, I=ingest 1h, r=refresh, q=quit, ←/→ tabs, ↑/↓ select, c=chat")
