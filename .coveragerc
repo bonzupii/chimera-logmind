@@ -1,0 +1,12 @@
+[run]
+omit =
+    api/server.py
+    api/embeddings.py
+    api/security_audit.py
+    api/reporting.py
+    api/ingest.py
+    api/ingest_framework.py
+
+[report]
+show_missing = True
+fail_under = 100

@@ -138,17 +138,17 @@ def validate_path_param(path: str, param_name: str) -> str:
     return normalized
 
 
-def _handle_ping(conn: socket.socket) -> None:
+def _handle_ping(conn: socket.socket, db_path: Optional[str], tokens: list) -> None:
     """Handle PING command"""
     conn.sendall(b"PONG\n")
 
 
-def _handle_health(conn: socket.socket) -> None:
+def _handle_health(conn: socket.socket, db_path: Optional[str], tokens: list) -> None:
     """Handle HEALTH command"""
     conn.sendall(b"OK\n")
 
 
-def _handle_version(conn: socket.socket) -> None:
+def _handle_version(conn: socket.socket, db_path: Optional[str], tokens: list) -> None:
     """Handle VERSION command"""
     conn.sendall((APP_VERSION + "\n").encode())
 

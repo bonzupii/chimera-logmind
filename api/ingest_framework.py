@@ -351,14 +351,15 @@ class IngestionFramework:
             container_names = proc.stdout.strip().split('\n') if proc.stdout.strip() else []
 
             # Filter containers
+            import fnmatch as _fnmatch
             filtered_containers = []
             for name in container_names:
                 if not name:
                     continue
 
-                # Check include/exclude patterns
-                include_match = any(re.match(pattern, name) for pattern in include_patterns)
-                exclude_match = any(re.match(pattern, name) for pattern in exclude_patterns)
+                # Check include/exclude patterns using glob-style matching
+                include_match = any(_fnmatch.fnmatch(name, pattern) for pattern in include_patterns)
+                exclude_match = any(_fnmatch.fnmatch(name, pattern) for pattern in exclude_patterns)
 
                 if include_match and not exclude_match:
                     filtered_containers.append(name)
@@ -407,6 +408,18 @@ class IngestionFramework:
                     continue
                 entry = parsed
 
+            # Ensure raw is valid JSON literal for DuckDB JSON column
+            raw_value = entry.get('raw')
+            if isinstance(raw_value, str):
+                try:
+                    # If it parses as JSON, keep it
+                    json.loads(raw_value)
+                except Exception:
+                    # Wrap the raw string in an object
+                    raw_value = json.dumps({"raw": raw_value})
+            elif isinstance(raw_value, dict):
+                raw_value = json.dumps(raw_value)
+
             # Compute fingerprint
             fp_src = f"{entry['ts']}|{entry['hostname']}|{entry['unit']}|{entry['severity']}|{entry['pid']}|{entry['message']}".encode()
             fingerprint = hashlib.sha256(fp_src).hexdigest()
@@ -419,7 +432,7 @@ class IngestionFramework:
                 numeric_id,
                 entry['ts'], entry['hostname'], entry['source'], entry['unit'],
                 entry['facility'], entry['severity'], entry['pid'], entry['uid'],
-                entry['gid'], entry['message'], entry['raw'], fingerprint, entry['cursor']
+                entry['gid'], entry['message'], raw_value, fingerprint, entry['cursor']
             )
             rows.append(row)
 

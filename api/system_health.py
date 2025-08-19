@@ -65,7 +65,7 @@ class SystemMetricsCollector:
     def collect_disk_metrics(self) -> List[Dict[str, Any]]:
         """Collect disk metrics for all partitions"""
         metrics = []
-        timestamp = dt.datetime.utcnow()
+        timestamp = dt.datetime.now(dt.timezone.utc)
 
         for partition in psutil.disk_partitions():
             try:
@@ -103,7 +103,7 @@ class SystemMetricsCollector:
     def collect_network_metrics(self) -> List[Dict[str, Any]]:
         """Collect network metrics for all interfaces"""
         metrics = []
-        timestamp = dt.datetime.utcnow()
+        timestamp = dt.datetime.now(dt.timezone.utc)
 
         # Get network I/O counters
         net_io = psutil.net_io_counters(pernic=True)
@@ -149,7 +149,7 @@ class SystemMetricsCollector:
     def collect_service_metrics(self) -> List[Dict[str, Any]]:
         """Collect systemd service status metrics"""
         metrics = []
-        timestamp = dt.datetime.utcnow()
+        timestamp = dt.datetime.now(dt.timezone.utc)
 
         try:
             # Get systemd service status
@@ -184,11 +184,12 @@ class SystemMetricsCollector:
 
     def collect_uptime_metrics(self) -> Dict[str, Any]:
         """Collect system uptime metrics"""
-        boot_time = dt.datetime.fromtimestamp(psutil.boot_time())
-        uptime = dt.datetime.utcnow() - boot_time
+        boot_time = dt.datetime.fromtimestamp(psutil.boot_time(), tz=dt.timezone.utc)
+        now = dt.datetime.now(dt.timezone.utc)
+        uptime = now - boot_time
 
         return {
-            "timestamp": dt.datetime.utcnow(),
+            "timestamp": now,
             "metric_type": "uptime",
             "boot_time": boot_time,
             "uptime_seconds": uptime.total_seconds(),
