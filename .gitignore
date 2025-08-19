@@ -49,6 +49,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+.ruff_cache/
 cover/
 
 # Virtual environments
@@ -59,6 +60,9 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.python-version
+.direnv/
+.envrc
 
 # Spyder project settings
 .spyderproject
@@ -238,3 +242,4 @@ reports/
 embeddings/
 models/
 .ollama/
+.crush
